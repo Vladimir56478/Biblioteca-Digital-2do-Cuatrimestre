@@ -1,0 +1,14 @@
+#.gitignore for Lorekeeper project
+# Ignore environment files and virtualenv
+backend/.env
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+.vscode/
+.idea/
+node_modules/

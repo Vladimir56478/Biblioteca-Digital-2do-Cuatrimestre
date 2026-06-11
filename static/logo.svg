@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="160" height="160">
+  <rect x="10" y="40" width="60" height="100" rx="6" fill="#b88" />
+  <rect x="70" y="30" width="60" height="120" rx="6" fill="#a66" />
+  <rect x="130" y="45" width="60" height="100" rx="6" fill="#8b5" />
+  <g>
+    <text x="100" y="180" font-family="Verdana" font-size="18" text-anchor="middle" fill="#0b5a52">Lorekeeper</text>
+  </g>
+</svg>

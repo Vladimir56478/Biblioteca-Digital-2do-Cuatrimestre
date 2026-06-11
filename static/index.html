@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lorekeeper - Biblioteca</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="device">
+    <div class="app">
+      <header class="logo">
+        <img src="/static/logo.svg" alt="Lorekeeper" />
+      </header>
+
+      <main>
+        <section class="login" id="view-login">
+          <form id="loginForm">
+            <input name="Gmail" placeholder="Ingrese su correo" required />
+            <div style="position:relative"><input name="Contraseña" placeholder="Ingrese su contraseña" type="password" required /></div>
+            <button type="submit">Iniciar sesión</button>
+          </form>
+          <div id="loginMsg" class="msg"></div>
+          <div id="welcome" style="display:none; margin-top:8px;"></div>
+        </section>
+
+        <section class="search" id="view-home" style="display:block">
+          <div class="section-title">¡Hola!</div>
+          <div class="search">
+            <input id="searchInput" placeholder="Buscar título del libro" />
+            <button id="searchBtn">🔍</button>
+          </div>
+
+          <div class="section-title">Catálogo</div>
+          <section id="results" class="cards"></section>
+        </section>
+
+        <section id="view-admin" style="display:none">
+          <div class="section-title">Crear cuenta / Alta libro</div>
+          <h3>Agregar nuevo libro</h3>
+          <form id="bookForm">
+            <input name="Titulo" placeholder="Titulo" required />
+            <input name="Editorial" placeholder="Editorial" />
+            <select name="ID_Autor" id="authorSelect"><option value="">Seleccione autor</option></select>
+            <input name="Año_Publicacion" placeholder="Año de publicación" type="number" />
+            <input name="ISBN" placeholder="ISBN" />
+            <textarea name="Sinopsis" placeholder="Sinopsis"></textarea>
+            <input name="Stock" placeholder="Stock" type="number" value="1" />
+            <button type="submit">Agregar libro</button>
+          </form>
+          <div id="bookMsg" class="msg"></div>
+        </section>
+
+        <section id="view-reserve" style="display:none">
+          <div class="section-title">Reservar</div>
+          <form id="reserveForm">
+            <input name="ID_Libro" placeholder="ID_Libro" type="number" required />
+            <input name="ID_Usuario" placeholder="ID_Usuario" type="number" required />
+            <input name="Cantidad" placeholder="Cantidad" type="number" value="1" min="1" />
+            <button type="submit">Reservar libro</button>
+          </form>
+          <div id="reserveMsg" class="msg"></div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav">
+        <a href="#" class="nav-item" data-view="home"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
+        <a href="#" class="nav-item" data-view="reserve"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
+        <a href="#" class="nav-item" data-view="admin"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
+      </nav>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
