@@ -385,66 +385,7 @@ try {
 console.log('[APP] Setup complete, waiting for DOM...')
 
 // Add global form submit interceptor
-document.addEventListener('submit', (e) => {
-  const form = e.target
-  if (form.id === 'signupForm') {
-    console.log('[INTERCEPT] Caught signup form submit')
-    e.preventDefault()
-    e.stopPropagation()
-    const data = Object.fromEntries(new FormData(form).entries())
-    fetch('/api/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()).then(j => {
-      const msg = document.getElementById('signupMsg')
-      if (res.ok) {
-        authState.isAuthenticated = true
-        authState.ID_Usuario = j.ID_Usuario
-        authState.Nombre_Completo = j.Nombre_Completo
-        authState.Tipo = j.Tipo
-        saveAuthState()
-        updateUIBasedOnAuth()
-        if (msg) msg.textContent = 'Cuenta creada'
-        form.reset()
-      } else {
-        if (msg) msg.textContent = 'Error: ' + j.detail
-      }
-    }).catch(err => {
-      console.error('[INTERCEPT] Error:', err)
-      const msg = document.getElementById('signupMsg')
-      if (msg) msg.textContent = 'Error: ' + err.message
-    })
-  } else if (form.id === 'loginForm') {
-    console.log('[INTERCEPT] Caught login form submit')
-    e.preventDefault()
-    e.stopPropagation()
-    const data = Object.fromEntries(new FormData(form).entries())
-    fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    }).then(res => res.json()).then(j => {
-      const msg = document.getElementById('loginMsg')
-      if (res.ok) {
-        authState.isAuthenticated = true
-        authState.ID_Usuario = j.ID_Usuario
-        authState.Nombre_Completo = j.Nombre_Completo
-        authState.Tipo = j.Tipo
-        saveAuthState()
-        updateUIBasedOnAuth()
-        form.reset()
-        showView('home')
-        doSearch()
-      } else {
-        if (msg) msg.textContent = 'Error: ' + j.detail
-      }
-    }).catch(err => {
-      const msg = document.getElementById('loginMsg')
-      if (msg) msg.textContent = 'Error: ' + err.message
-    })
-  }
-}, true)
+
 
 console.log('[APP] Global form interceptor added')
 
