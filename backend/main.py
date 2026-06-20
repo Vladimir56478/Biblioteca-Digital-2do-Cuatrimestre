@@ -52,6 +52,22 @@ def generate_res_code(conn) -> str:
             raise RuntimeError('Could not generate unique reservation code')
 
 
+class LoginIn(BaseModel):
+    Gmail: str
+    Contraseña: str
+
+
+class SignupIn(BaseModel):
+    Nombre_Completo: str
+    Gmail: str
+    Contraseña: str
+
+
+def infer_user_type(gmail: str) -> str:
+    """Infer user type (Alumno/Profesor) from email format"""
+    return 'Alumno' if '@alu.' in gmail else 'Profesor'
+
+
 @app.get('/api/authors')
 def list_authors():
     with engine.connect() as conn:
@@ -149,23 +165,38 @@ def reserve(data: ReserveIn):
         return {'ok': True, 'Codigo_reserva': code}
 
 
-    class LoginIn(BaseModel):
-        Gmail: str
-        Contraseña: str
+@app.post('/api/login')
+def login(data: LoginIn):
+    """Login user with Gmail and Contraseña"""
+    with engine.connect() as conn:
+        r = conn.execute(text("SELECT ID_Usuario, Nombre_Completo, Gmail, Estado FROM Usuario WHERE Gmail = :g AND Contraseña = :p"), {'g': data.Gmail, 'p': data.Contraseña}).fetchone()
+        if not r:
+            raise HTTPException(status_code=401, detail='Credenciales inválidas')
+        gmail = r[2]
+        tipo = infer_user_type(gmail)
+        return {'ID_Usuario': r[0], 'Nombre_Completo': r[1], 'Gmail': r[2], 'Estado': r[3], 'Tipo': tipo}
 
 
-    @app.post('/api/login')
-    def login(data: LoginIn):
-        with engine.connect() as conn:
-            r = conn.execute(text("SELECT ID_Usuario, Nombre_Completo, Gmail, Estado FROM Usuario WHERE Gmail = :g AND Contraseña = :p"), {'g': data.Gmail, 'p': data.Contraseña}).fetchone()
-            if not r:
-                raise HTTPException(status_code=401, detail='Credenciales inválidas')
-            # inferir tipo por formato de correo
-            gmail = r[2]
-            tipo = 'Profesor'
-            if '@alu.' in gmail:
-                tipo = 'Alumno'
-            return {'ID_Usuario': r[0], 'Nombre_Completo': r[1], 'Gmail': r[2], 'Estado': r[3], 'Tipo': tipo}
+@app.post('/api/signup')
+def signup(data: SignupIn):
+    """Create new user account. Automatically detects user type (Alumno/Profesor) from Gmail"""
+    tipo = infer_user_type(data.Gmail)
+    with engine.begin() as conn:
+        # Check if Gmail already exists
+        existing = conn.execute(text("SELECT 1 FROM Usuario WHERE Gmail = :g"), {'g': data.Gmail}).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail='El correo ya está registrado')
+        # Insert new user
+        stmt = text(
+            "INSERT INTO Usuario (Nombre_Completo, Gmail, Contraseña, Estado)"
+            " VALUES (:nombre, :gmail, :contraseña, 'no vetado')"
+        )
+        try:
+            res = conn.execute(stmt, {'nombre': data.Nombre_Completo, 'gmail': data.Gmail, 'contraseña': data.Contraseña})
+            new_id = res.lastrowid
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {'ok': True, 'ID_Usuario': new_id, 'Nombre_Completo': data.Nombre_Completo, 'Gmail': data.Gmail, 'Tipo': tipo}
 
 
 # Serve static files (robust path resolution)

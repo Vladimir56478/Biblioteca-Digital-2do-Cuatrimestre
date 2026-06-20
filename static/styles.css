@@ -21,6 +21,14 @@ body{font-family:Inter, system-ui, Arial, sans-serif;margin:0;background:#bfa0a2
 .login input{padding:12px;border-radius:12px;border:1px solid #cfc6c6}
 .login button{background:var(--accent);color:white;padding:12px;border-radius:10px;border:none;font-weight:600}
 
+/* Auth tabs styling */
+.auth-tabs{display:flex;gap:8px;margin-bottom:12px;border-bottom:2px solid #e6e2e2}
+.auth-tab{background:transparent;border:none;padding:10px 16px;font-size:14px;color:#999;cursor:pointer;border-bottom:3px solid transparent;transition:all 0.2s}
+.auth-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.auth-form{display:flex;flex-direction:column;gap:10px}
+.auth-form input{padding:12px;border-radius:10px;border:1px solid #ddd}
+.auth-form button{background:var(--accent);color:white;padding:12px;border-radius:10px;border:none;font-weight:600}
+
 .search{display:flex;gap:8px;margin:12px 0}
 .search input{flex:1;padding:12px;border-radius:28px;border:2px solid #dcd7d7;padding-left:44px;background:white;background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"><path fill="%23bdbdbd" d="M9.5 3a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zm10 17-4.35-4.35"/></svg>');background-repeat:no-repeat;background-position:12px center}
 .search button{background:transparent;border:none;padding:0 6px;color:var(--muted)}

@@ -14,17 +14,38 @@
       </header>
 
       <main>
-        <section class="login" id="view-login">
-          <form id="loginForm">
-            <input name="Gmail" placeholder="Ingrese su correo" required />
-            <div style="position:relative"><input name="Contraseña" placeholder="Ingrese su contraseña" type="password" required /></div>
+        <!-- PESTAÑA CUENTA: Login/Signup -->
+        <section id="view-account" style="display:block">
+          <div class="section-title">Mi Cuenta</div>
+          
+          <!-- Tabs para Login/Signup -->
+          <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
+            <button class="auth-tab" data-tab="signup">Crear cuenta</button>
+          </div>
+
+          <!-- Login Form -->
+          <form id="loginForm" class="auth-form" data-form="login">
+            <input name="Gmail" placeholder="Gmail técnico" required />
+            <input name="Contraseña" placeholder="Contraseña" type="password" required />
             <button type="submit">Iniciar sesión</button>
           </form>
           <div id="loginMsg" class="msg"></div>
-          <div id="welcome" style="display:none; margin-top:8px;"></div>
+
+          <!-- Signup Form -->
+          <form id="signupForm" class="auth-form" data-form="signup" style="display:none">
+            <input name="Nombre_Completo" placeholder="Nombre y Apellido" required />
+            <input name="Gmail" placeholder="Gmail técnico" required />
+            <input name="Contraseña" placeholder="Contraseña" type="password" required />
+            <button type="submit">Crear cuenta</button>
+          </form>
+          <div id="signupMsg" class="msg"></div>
+
+          <!-- Welcome message -->
+          <div id="welcome" style="display:none; margin-top:12px; padding:12px; background:#e8f5e9; border-radius:8px; color:#2e7d32;"></div>
         </section>
 
-        <section class="search" id="view-home" style="display:block">
+        <section class="search" id="view-home" style="display:none">
           <div class="section-title">¡Hola!</div>
           <div class="search">
             <input id="searchInput" placeholder="Buscar título del libro" />
@@ -36,8 +57,7 @@
         </section>
 
         <section id="view-admin" style="display:none">
-          <div class="section-title">Crear cuenta / Alta libro</div>
-          <h3>Agregar nuevo libro</h3>
+          <div class="section-title">Alta Libro</div>
           <form id="bookForm">
             <input name="Titulo" placeholder="Titulo" required />
             <input name="Editorial" placeholder="Editorial" />
@@ -54,8 +74,7 @@
         <section id="view-reserve" style="display:none">
           <div class="section-title">Reservar</div>
           <form id="reserveForm">
-            <input name="ID_Libro" placeholder="ID_Libro" type="number" required />
-            <input name="ID_Usuario" placeholder="ID_Usuario" type="number" required />
+            <input name="ID_Libro" placeholder="ID del libro" type="number" required />
             <input name="Cantidad" placeholder="Cantidad" type="number" value="1" min="1" />
             <button type="submit">Reservar libro</button>
           </form>
@@ -64,9 +83,10 @@
       </main>
 
       <nav class="bottom-nav">
-        <a href="#" class="nav-item" data-view="home"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
-        <a href="#" class="nav-item" data-view="reserve"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
-        <a href="#" class="nav-item" data-view="admin"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
+        <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
+        <a href="#" class="nav-item" data-view="home" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
+        <a href="#" class="nav-item" data-view="reserve" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
+        <a href="#" class="nav-item" data-view="admin" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
       </nav>
     </div>
   </div>
