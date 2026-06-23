@@ -1,42 +1,98 @@
 # Lorekeeper - Biblioteca (demo)
 
-Proyecto minimal para la app "Lorekeeper". Implementa:
+Proyecto minimal con backend en FastAPI y frontend estático.
 
-- Backend en FastAPI con conexión a MySQL (SQLAlchemy + PyMySQL)
-- Endpoints: `/api/authors`, `/api/books`, `/api/search`, `/api/reserve`
-- Frontend móvil (estático) en `static/` con HTML/CSS/JS
+- Backend: FastAPI + SQLAlchemy + PyMySQL
+- Base de datos: MySQL
+- Frontend: `static/` con HTML/CSS/JS
+- Endpoints principales: `/api/authors`, `/api/books`, `/api/search`, `/api/reserve`
 
-Instalación rápida:
+## 1. Instalar dependencias
 
-1. Crear un entorno virtual e instalar dependencias:
-
-```bash
+```powershell
 python -m venv .venv
-source .venv/bin/activate   # windows: .venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
+## 2. Configurar la base de datos
 
-2. Crear un archivo `.env` en la carpeta `backend/` (o exportar variables) con las credenciales. El proyecto acepta las variables `MYSQL_ADDON_*` o `MYSQL_ADDON_URI` proporcionadas por Clever Cloud. Ejemplo:
+Crea `backend/.env` con tus credenciales.
 
-```
-MYSQL_ADDON_HOST=bfoewoyw9sucpqt3tgf1-mysql.services.clever-cloud.com
-MYSQL_ADDON_DB=bfoewoyw9sucpqt3tgf1
-MYSQL_ADDON_USER=u7dgtmfkuhg5dtxp
+### MySQL local
+
+```ini
+MYSQL_ADDON_HOST=127.0.0.1
 MYSQL_ADDON_PORT=3306
+MYSQL_ADDON_USER=root
+MYSQL_ADDON_PASSWORD=admin
+MYSQL_ADDON_DB=biblioteca_digital
+```
+
+### MySQL en Clever Cloud
+
+```ini
+MYSQL_ADDON_HOST=bfoewoyw9sucpqt3tgf1-mysql.services.clever-cloud.com
+MYSQL_ADDON_PORT=3306
+MYSQL_ADDON_USER=u7dgtmfkuhg5dtxp
 MYSQL_ADDON_PASSWORD=YzSEZAOI7JW0h4EQgkwb
-# o bien (URI completa):
-MYSQL_ADDON_URI=mysql://u7dgtmfkuhg5dtxp:YzSEZAOI7JW0h4EQgkwb@bfoewoyw9sucpqt3tgf1-mysql.services.clever-cloud.com:3306/bfoewoyw9sucpqt3tgf1
+MYSQL_ADDON_DB=bfoewoyw9sucpqt3tgf1
 ```
 
-3. Ejecutar el servidor:
+O usar URI completa:
 
-```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```ini
+MYSQL_ADDON_URI=mysql://usuario:contraseña@host:3306/base_de_datos
 ```
 
-4. Abrir `http://localhost:8000/` para la interfaz móvil-first.
+> Con este archivo cambia la conexión sin tocar el código.
 
-Notas:
-- Todas las consultas usan parámetros preparados a través de SQLAlchemy `text()`.
-- El generador de códigos de reserva produce `RES-XXXX` y verifica unicidad en DB.
+## 3. Ejecutar el servidor
+
+Desde la raíz del proyecto:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## 4. Reiniciar el servidor
+
+Si cambias `backend/.env` o necesitas aplicar un cambio, detén el servidor con `Ctrl+C` y vuelve a ejecutar el mismo comando.
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## 5. Abrir la app
+
+En tu navegador local:
+
+```text
+http://localhost:8000/
+```
+
+Si quieres acceder desde otra computadora en la misma red, usa la IP de tu PC:
+
+```text
+http://<TU_IP_LOCAL>:8000/
+```
+
+## 6. Cerrar y volver a abrir Visual Studio Code
+
+- Antes de cerrar VS Code, detén el servidor con `Ctrl+C` en el terminal.
+- Si cierras VS Code con el servidor activo, el servidor se detiene automáticamente.
+- Al volver a abrir el proyecto, ejecuta de nuevo:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+> Esto aplica igual si usas MySQL local o Clever Cloud.
+
+## Notas
+
+- `backend/db.py` carga `backend/.env` directamente.
+- Si pones datos locales en `.env`, el backend usará tu MySQL local.
+- Si pones datos de Clever Cloud en `.env`, el backend usará la nube.
+- Todas las consultas en el backend usan SQLAlchemy `text()`.
+- El generador de reserva crea códigos `RES-XXXX` y verifica unicidad.
