@@ -18,12 +18,6 @@
         <section id="view-account" style="display:block">
           <div class="section-title">Mi Cuenta</div>
           
-          <!-- Tabs para Login/Signup -->
-          <div class="auth-tabs">
-            <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
-            <button class="auth-tab" data-tab="signup">Crear cuenta</button>
-          </div>
-
           <!-- Login Form -->
           <form id="loginForm" class="auth-form" data-form="login">
             <input name="Gmail" placeholder="Gmail técnico" required />
@@ -31,15 +25,6 @@
             <button type="submit">Iniciar sesión</button>
           </form>
           <div id="loginMsg" class="msg"></div>
-
-          <!-- Signup Form -->
-          <form id="signupForm" class="auth-form" data-form="signup" style="display:none">
-            <input name="Nombre_Completo" placeholder="Nombre y Apellido" required />
-            <input name="Gmail" placeholder="Gmail técnico" required />
-            <input name="Contraseña" placeholder="Contraseña" type="password" required />
-            <button type="submit">Crear cuenta</button>
-          </form>
-          <div id="signupMsg" class="msg"></div>
 
           <!-- Welcome message -->
           <div id="welcome" style="display:none; margin-top:12px; padding:12px; background:#e8f5e9; border-radius:8px; color:#2e7d32;"></div>
@@ -71,6 +56,21 @@
           <div id="bookMsg" class="msg"></div>
         </section>
 
+        <section id="view-edit" style="display:none">
+          <div class="section-title">Edición</div>
+          <p>Funcionalidad de edición disponible solo para el bibliotecario.</p>
+        </section>
+
+        <section id="view-history" style="display:none">
+          <div class="section-title">Historial</div>
+          <p>Registro de actividades del sistema visible para el bibliotecario.</p>
+        </section>
+
+        <section id="view-profiles" style="display:none">
+          <div class="section-title">Gestión de Perfiles</div>
+          <p>Gestión de usuarios y permisos disponible para el bibliotecario.</p>
+        </section>
+
         <section id="view-reserve" style="display:none">
           <div class="section-title">Reservar</div>
           <form id="reserveForm">
@@ -84,9 +84,12 @@
 
       <nav class="bottom-nav">
         <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
-        <a href="#" class="nav-item" data-view="home" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
-        <a href="#" class="nav-item" data-view="reserve" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
-        <a href="#" class="nav-item" data-view="admin" data-protected="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
+        <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
+        <a href="#" class="nav-item" data-view="reserve" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
+        <a href="#" class="nav-item" data-view="admin" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
+        <a href="#" class="nav-item" data-view="edit" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="#333" stroke-width="1.6"/><path d="M7 11l5 5 5-5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Edición</span></a>
+        <a href="#" class="nav-item" data-view="history" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 10h16M4 15h16" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Historial</span></a>
+        <a href="#" class="nav-item" data-view="profiles" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Perfiles</span></a>
       </nav>
     </div>
   </div>

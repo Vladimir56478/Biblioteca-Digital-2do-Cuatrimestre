@@ -24,6 +24,13 @@ function saveAuthState() {
   localStorage.setItem('authState', JSON.stringify(authState))
 }
 
+function getAuthHeaders(extra = {}) {
+  const headers = { ...extra }
+  if (authState.ID_Usuario) headers['X-User-Id'] = String(authState.ID_Usuario)
+  if (authState.Tipo) headers['X-User-Type'] = authState.Tipo
+  return headers
+}
+
 // Logout
 function logout() {
   authState = { isAuthenticated: false, ID_Usuario: null, Nombre_Completo: null, Tipo: null }
@@ -40,11 +47,23 @@ function updateUIBasedOnAuth() {
   const welcome = document.getElementById('welcome')
   console.log('[UI] Welcome element:', welcome ? 'found' : 'NOT FOUND')
   
+  const normalizedRole = authState.Tipo ? authState.Tipo.trim() : ''
+  const isUser = normalizedRole === 'Alumno' || normalizedRole === 'Profesor' || normalizedRole === 'Bibliotecario'
+
   if (authState.isAuthenticated) {
     protectedItems.forEach(item => {
-      item.style.opacity = '1'
-      item.style.pointerEvents = 'auto'
-      item.style.cursor = 'pointer'
+      const requiredRole = item.getAttribute('data-role')
+      let isVisible = false
+      if (!requiredRole || requiredRole === 'user') {
+        isVisible = isUser
+      } else if (requiredRole === 'Bibliotecario') {
+        isVisible = normalizedRole === 'Bibliotecario'
+      } else {
+        isVisible = normalizedRole === requiredRole
+      }
+      item.style.opacity = isVisible ? '1' : '0.35'
+      item.style.pointerEvents = isVisible ? 'auto' : 'none'
+      item.style.cursor = isVisible ? 'pointer' : 'not-allowed'
     })
     if (welcome) {
       welcome.style.display = 'block'
@@ -73,7 +92,13 @@ function showView(viewName) {
       showView('account')
       return
     }
-    const views = ['account', 'home', 'reserve', 'admin']
+    const adminViews = ['admin', 'edit', 'history', 'profiles']
+    if (adminViews.includes(viewName) && authState.Tipo !== 'Bibliotecario') {
+      console.warn('Acceso bloqueado: solo el bibliotecario puede entrar a esta vista')
+      showView('home')
+      return
+    }
+    const views = ['account', 'home', 'reserve', 'admin', 'edit', 'history', 'profiles']
     views.forEach(v => {
       const el = document.getElementById('view-' + v)
       if (el) el.style.display = 'none'
@@ -244,7 +269,7 @@ function setupEventListeners() {
       data.Stock = Number(data.Stock || 0)
       const res = await fetch('/api/books', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(data)
       })
       const j = await res.json()
@@ -277,7 +302,7 @@ function setupEventListeners() {
       }
       const res = await fetch('/api/reserve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(data)
       })
       const j = await res.json()
