@@ -53,6 +53,8 @@ DEFAULT_USERS = [
     },
 ]
 
+VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
+
 
 def ensure_user_role_column():
     try:
@@ -100,6 +102,25 @@ def ensure_default_users():
 ensure_default_users()
 
 
+def ensure_baja_ejemplares_table():
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS Baja_Ejemplares ("
+            "ID_Baja INT AUTO_INCREMENT PRIMARY KEY, "
+            "ID_Libro INT NOT NULL, "
+            "ID_Usuario_Bibliotecario INT NOT NULL, "
+            "Cantidad INT NOT NULL, "
+            "Motivo VARCHAR(50) NOT NULL, "
+            "Fecha DATETIME NOT NULL, "
+            "FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
+            "FOREIGN KEY (ID_Usuario_Bibliotecario) REFERENCES Usuario(ID_Usuario)"
+            ") ENGINE=InnoDB"
+        ))
+
+
+ensure_baja_ejemplares_table()
+
+
 class BookIn(BaseModel):
     Titulo: str = Field(..., max_length=100)
     Editorial: str | None = None
@@ -110,10 +131,27 @@ class BookIn(BaseModel):
     Stock: int = 0
 
 
+class BookUpdate(BaseModel):
+    Titulo: str | None = None
+    Editorial: str | None = None
+    ID_Autor: int | None = None
+    Año_Publicacion: int | None = None
+    ISBN: str | None = None
+    Sinopsis: str | None = None
+    Stock: int | None = None
+    Motivo: str | None = None
+
+
 class ReserveIn(BaseModel):
     ID_Libro: int
     ID_Usuario: int
     Cantidad: int = 1
+
+
+class StockReductionIn(BaseModel):
+    ID_Libro: int
+    Cantidad: int
+    Motivo: str
 
 
 def generate_res_code(conn) -> str:
@@ -215,6 +253,28 @@ def get_authenticated_user(
     return user
 
 
+def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int, motivo: str):
+    motivo = motivo.strip()
+    if motivo not in VALID_BAJA_MOTIVOS:
+        raise HTTPException(status_code=400, detail=f'Motivo inválido: {motivo}')
+    if cantidad <= 0:
+        raise HTTPException(status_code=400, detail='La cantidad de baja debe ser mayor a cero')
+
+    conn.execute(
+        text(
+            "INSERT INTO Baja_Ejemplares (ID_Libro, ID_Usuario_Bibliotecario, Cantidad, Motivo, Fecha)"
+            " VALUES (:id_libro, :id_usuario, :cantidad, :motivo, :fecha)"
+        ),
+        {
+            'id_libro': libro_id,
+            'id_usuario': bibliotecario_id,
+            'cantidad': cantidad,
+            'motivo': motivo,
+            'fecha': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+    )
+
+
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
     def decorator(func):
         if inspect.iscoroutinefunction(func):
@@ -285,6 +345,105 @@ def add_book(request: Request, book: BookIn):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
         return {'ok': True, 'inserted': res.lastrowid}
+
+
+@app.get('/api/books/{book_id}')
+@require_role('Bibliotecario', require_admin_email=True)
+def get_book(request: Request, book_id: int):
+    with engine.connect() as conn:
+        r = conn.execute(
+            text(
+                "SELECT l.ID_Libro, l.Titulo, l.Editorial, l.ID_Autor, l.Año_Publicacion, l.ISBN, l.Sinopsis, l.Stock, a.Nombre "
+                "FROM Libro l LEFT JOIN Autor a ON l.ID_Autor = a.ID_Autor WHERE l.ID_Libro = :id"
+            ),
+            {'id': book_id}
+        ).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+        return {
+            'ID_Libro': r[0],
+            'Titulo': r[1],
+            'Editorial': r[2],
+            'ID_Autor': r[3],
+            'Año_Publicacion': r[4],
+            'ISBN': r[5],
+            'Sinopsis': r[6],
+            'Stock': r[7],
+            'Autor': r[8],
+        }
+
+
+@app.put('/api/books/{book_id}')
+@require_role('Bibliotecario', require_admin_email=True)
+def update_book(request: Request, book_id: int, book: BookUpdate):
+    user = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
+    with engine.begin() as conn:
+        current = conn.execute(text("SELECT Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock FROM Libro WHERE ID_Libro = :id"), {'id': book_id}).fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+
+        updates = []
+        params: dict[str, object] = {'id': book_id}
+        if book.Titulo is not None:
+            updates.append('Titulo = :titulo')
+            params['titulo'] = book.Titulo
+        if book.Editorial is not None:
+            updates.append('Editorial = :editorial')
+            params['editorial'] = book.Editorial
+        if book.ID_Autor is not None:
+            updates.append('ID_Autor = :id_autor')
+            params['id_autor'] = book.ID_Autor
+        if book.Año_Publicacion is not None:
+            updates.append('Año_Publicacion = :anio')
+            params['anio'] = book.Año_Publicacion
+        if book.ISBN is not None:
+            updates.append('ISBN = :isbn')
+            params['isbn'] = book.ISBN
+        if book.Sinopsis is not None:
+            updates.append('Sinopsis = :sinopsis')
+            params['sinopsis'] = book.Sinopsis
+
+        current_stock = int(current[6])
+        if book.Stock is not None:
+            new_stock = int(book.Stock)
+            if new_stock < 0:
+                raise HTTPException(status_code=400, detail='Stock no puede ser negativo')
+            if new_stock < current_stock:
+                if not book.Motivo:
+                    raise HTTPException(status_code=400, detail='Motivo requerido al reducir stock')
+                reduction = current_stock - new_stock
+                updates.append('Stock = :stock')
+                params['stock'] = new_stock
+                conn.execute(text("UPDATE Libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
+                insert_baja_record(conn, book_id, user['ID_Usuario'], reduction, book.Motivo)
+                return {'ok': True, 'updated': book_id, 'reduced': reduction}
+            updates.append('Stock = :stock')
+            params['stock'] = new_stock
+
+        if updates:
+            conn.execute(text("UPDATE Libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
+        return {'ok': True, 'updated': book_id}
+
+
+@app.post('/api/stock-reduction')
+@require_role('Bibliotecario', require_admin_email=True)
+def stock_reduction(request: Request, data: StockReductionIn):
+    user = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
+    motivo = data.Motivo.strip() if data.Motivo else ''
+    if motivo not in VALID_BAJA_MOTIVOS:
+        raise HTTPException(status_code=400, detail='Motivo inválido')
+    if data.Cantidad <= 0:
+        raise HTTPException(status_code=400, detail='Cantidad inválida')
+
+    with engine.begin() as conn:
+        book = conn.execute(text("SELECT Stock FROM Libro WHERE ID_Libro = :id"), {'id': data.ID_Libro}).fetchone()
+        if not book:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+        if book[0] < data.Cantidad:
+            raise HTTPException(status_code=400, detail='Stock insuficiente para esta baja')
+        conn.execute(text("UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id"), {'cantidad': data.Cantidad, 'id': data.ID_Libro})
+        insert_baja_record(conn, data.ID_Libro, user['ID_Usuario'], data.Cantidad, motivo)
+        return {'ok': True, 'ID_Libro': data.ID_Libro, 'Cantidad': data.Cantidad}
 
 
 @app.get('/api/search')

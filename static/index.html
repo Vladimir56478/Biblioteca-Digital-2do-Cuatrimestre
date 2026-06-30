@@ -58,7 +58,31 @@
 
         <section id="view-edit" style="display:none">
           <div class="section-title">Edición</div>
-          <p>Funcionalidad de edición disponible solo para el bibliotecario.</p>
+          <p>Editar libro y registrar bajas de stock con motivo técnico.</p>
+          <div class="search">
+            <input id="editSearchInput" placeholder="Buscar libro para editar" />
+            <button id="editSearchBtn">Buscar</button>
+          </div>
+          <section id="editResults" class="cards"></section>
+
+          <form id="editForm" style="display:none">
+            <input type="hidden" name="ID_Libro" id="editBookId" />
+            <input name="Titulo" id="editTitulo" placeholder="Titulo" required />
+            <input name="Editorial" id="editEditorial" placeholder="Editorial" />
+            <select name="ID_Autor" id="editAuthorSelect"><option value="">Seleccione autor</option></select>
+            <input name="Año_Publicacion" id="editAño_Publicacion" placeholder="Año de publicación" type="number" />
+            <input name="ISBN" id="editISBN" placeholder="ISBN" />
+            <textarea name="Sinopsis" id="editSinopsis" placeholder="Sinopsis"></textarea>
+            <input name="Stock" id="editStock" placeholder="Stock" type="number" min="0" />
+            <select name="Motivo" id="editMotivo" style="display:none">
+              <option value="">Seleccione motivo técnico</option>
+              <option value="Dañado">Dañado</option>
+              <option value="Extraviado">Extraviado</option>
+              <option value="Retirado">Retirado</option>
+            </select>
+            <button type="submit">Guardar cambios</button>
+          </form>
+          <div id="editMsg" class="msg"></div>
         </section>
 
         <section id="view-history" style="display:none">

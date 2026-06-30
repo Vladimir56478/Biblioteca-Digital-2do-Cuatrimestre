@@ -6,6 +6,8 @@ let authState = {
   Tipo: null
 }
 
+let currentEditBookStock = null
+
 console.log('[APP] Script loaded')
 
 // Load auth state from localStorage
@@ -17,6 +19,10 @@ function loadAuthState() {
   }
   console.log('[AUTH] Auth state loaded:', authState.isAuthenticated)
   updateUIBasedOnAuth()
+  if (authState.isAuthenticated) {
+    showView('home')
+    doSearch()
+  }
 }
 
 // Save auth state to localStorage
@@ -105,6 +111,9 @@ function showView(viewName) {
     })
     const target = document.getElementById('view-' + viewName)
     if (target) target.style.display = 'block'
+    if (viewName === 'edit') {
+      loadEditBooks()
+    }
   } catch (e) {
     console.error('Error in showView:', e)
   }
@@ -115,18 +124,77 @@ async function fetchAuthors() {
   try {
     const res = await fetch('/api/authors')
     const authors = await res.json()
-    const sel = document.getElementById('authorSelect')
-    if (sel) {
+    const selects = document.querySelectorAll('#authorSelect, #editAuthorSelect')
+    selects.forEach(sel => {
+      if (!sel) return
+      sel.innerHTML = '<option value="">Seleccione autor</option>'
       authors.forEach(a => {
         const opt = document.createElement('option')
         opt.value = a.ID_Autor
         opt.textContent = a.Nombre
         sel.appendChild(opt)
       })
-    }
+    })
   } catch (e) {
     console.error('Error fetching authors:', e)
   }
+}
+
+async function loadEditBooks(query = '') {
+  const results = document.getElementById('editResults')
+  if (!results) return
+  try {
+    const res = await fetch('/api/search?title=' + encodeURIComponent(query))
+    const items = await res.json()
+    results.innerHTML = ''
+    if (!items.length) {
+      results.innerHTML = '<p>No se encontraron libros para editar</p>'
+      return
+    }
+    items.forEach(it => {
+      const card = document.createElement('div')
+      card.className = 'card'
+      card.innerHTML = `
+        <div class="thumb"></div>
+        <div style="flex:1">
+          <div style="font-weight:700; color:var(--accent); margin-bottom:4px"><span style="font-size:12px; background:#e8e8e8; padding:2px 6px; border-radius:4px;">#${it.ID_Libro}</span> ${it.Titulo}</div>
+          <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
+          <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
+          <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
+          <button type="button" class="edit-book-btn" data-id="${it.ID_Libro}">Editar</button>
+        </div>
+      `
+      results.appendChild(card)
+    })
+    document.querySelectorAll('.edit-book-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const bookId = Number(btn.getAttribute('data-id'))
+        const book = items.find(item => item.ID_Libro === bookId)
+        if (book) populateEditForm(book)
+      })
+    })
+  } catch (e) {
+    console.error('Error loading edit books:', e)
+  }
+}
+
+function populateEditForm(book) {
+  const form = document.getElementById('editForm')
+  if (!form) return
+  document.getElementById('editBookId').value = book.ID_Libro
+  document.getElementById('editTitulo').value = book.Titulo || ''
+  document.getElementById('editEditorial').value = book.Editorial || ''
+  document.getElementById('editAño_Publicacion').value = book.Año_Publicacion || ''
+  document.getElementById('editISBN').value = book.ISBN || ''
+  document.getElementById('editSinopsis').value = book.Sinopsis || ''
+  document.getElementById('editStock').value = book.Stock ?? 0
+  document.getElementById('editMotivo').value = ''
+  currentEditBookStock = book.Stock ?? 0
+  const authorSelect = document.getElementById('editAuthorSelect')
+  if (authorSelect) {
+    authorSelect.value = book.ID_Autor || ''
+  }
+  form.style.display = 'block'
 }
 
 // Search books and display with ID
@@ -320,6 +388,83 @@ function setupEventListeners() {
       }
       e.target.reset()
     })
+  }
+
+  const editSearchBtn = document.getElementById('editSearchBtn')
+  const editSearchInput = document.getElementById('editSearchInput')
+  if (editSearchBtn && editSearchInput) {
+    editSearchBtn.addEventListener('click', () => {
+      loadEditBooks(editSearchInput.value)
+    })
+    editSearchInput.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') loadEditBooks(editSearchInput.value)
+    })
+  }
+
+  const editForm = document.getElementById('editForm')
+  if (editForm) {
+    editForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const formData = Object.fromEntries(new FormData(e.target).entries())
+      const bookId = Number(formData.ID_Libro)
+      const stockValue = formData.Stock !== '' ? Number(formData.Stock) : undefined
+      const payload = {
+        Titulo: formData.Titulo || undefined,
+        Editorial: formData.Editorial || undefined,
+        ID_Autor: formData.ID_Autor ? Number(formData.ID_Autor) : undefined,
+        Año_Publicacion: formData.Año_Publicacion ? Number(formData.Año_Publicacion) : undefined,
+        ISBN: formData.ISBN || undefined,
+        Sinopsis: formData.Sinopsis || undefined,
+        Stock: stockValue,
+      }
+      if (currentEditBookStock !== null && stockValue !== undefined && stockValue < currentEditBookStock) {
+        if (!formData.Motivo) {
+          const msg = document.getElementById('editMsg')
+          if (msg) {
+            msg.textContent = 'Debe seleccionar un motivo técnico cuando reduce stock.'
+            msg.style.color = 'red'
+          }
+          return
+        }
+        payload.Motivo = formData.Motivo
+      }
+      const res = await fetch('/api/books/' + bookId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(payload)
+      })
+      const j = await res.json()
+      const msg = document.getElementById('editMsg')
+      if (res.ok) {
+        if (msg) {
+          msg.textContent = 'Libro actualizado correctamente'
+          msg.style.color = 'green'
+        }
+        loadEditBooks(editSearchInput?.value || '')
+        if (currentEditBookStock !== null && stockValue !== undefined && stockValue < currentEditBookStock) {
+          document.getElementById('editMotivo').value = ''
+        }
+      } else {
+        if (msg) {
+          msg.textContent = 'Error: ' + (j.detail || 'Error')
+          msg.style.color = 'red'
+        }
+      }
+    })
+
+    const editStockInput = document.getElementById('editStock')
+    const editMotivoSelect = document.getElementById('editMotivo')
+    if (editStockInput && editMotivoSelect) {
+      editStockInput.addEventListener('input', () => {
+        const stockValue = Number(editStockInput.value)
+        if (currentEditBookStock !== null && stockValue < currentEditBookStock) {
+          editMotivoSelect.style.display = 'block'
+        } else {
+          editMotivoSelect.style.display = 'none'
+          editMotivoSelect.value = ''
+        }
+      })
+    }
   }
 
   console.log('[EVENTS] Event listeners setup complete')
