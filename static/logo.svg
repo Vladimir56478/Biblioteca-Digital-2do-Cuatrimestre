@@ -1,8 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="160" height="160">
-  <rect x="10" y="40" width="60" height="100" rx="6" fill="#b88" />
-  <rect x="70" y="30" width="60" height="120" rx="6" fill="#a66" />
-  <rect x="130" y="45" width="60" height="100" rx="6" fill="#8b5" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280" width="160" height="160" role="img" aria-label="Logo Lorekeeper">
+  <defs>
+    <linearGradient id="frameGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8c5a32" />
+      <stop offset="100%" stop-color="#5c3a20" />
+    </linearGradient>
+    <linearGradient id="bookSpineGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d6b18b" />
+      <stop offset="100%" stop-color="#a47e5f" />
+    </linearGradient>
+  </defs>
+  <rect x="18" y="26" width="244" height="192" rx="28" fill="url(#frameGrad)" stroke="#3f2a1d" stroke-width="6" />
+  <rect x="30" y="38" width="220" height="168" rx="22" fill="#f5e3cf" />
   <g>
-    <text x="100" y="180" font-family="Verdana" font-size="18" text-anchor="middle" fill="#0b5a52">Lorekeeper</text>
+    <rect x="46" y="62" width="30" height="118" rx="10" fill="#7c4a2a" />
+    <rect x="88" y="56" width="30" height="124" rx="10" fill="#b2593f" />
+    <rect x="130" y="70" width="30" height="110" rx="10" fill="#4c6d7c" />
+    <rect x="172" y="64" width="30" height="116" rx="10" fill="#4d7b5d" />
+    <path d="M62 62 C59 42, 84 42, 82 62 S68 92, 62 62" fill="#e7d9ca" stroke="#b6a393" stroke-width="2" />
+    <path d="M138 72 C134 52, 160 52, 156 72 S142 102, 138 72" fill="#f1e7dd" stroke="#b8a897" stroke-width="2" />
+    <path d="M90 150 C88 132, 110 132, 108 152 S92 168, 90 150" fill="#f4eee4" />
+    <path d="M198 72 L196 65 C194 56, 180 54, 172 64 L166 68 C159 74, 152 88, 152 96 L156 102 C162 112, 176 118, 184 108 L190 102 C194 98, 196 90, 198 72 Z" fill="#5a4032" />
+    <path d="M190 74 C174 96, 156 102, 150 104" stroke="#f3e1cb" stroke-width="4" fill="none" />
   </g>
+  <rect x="44" y="196" width="192" height="44" rx="18" fill="#3b4d53" />
+  <text x="140" y="220" font-family="Segoe UI, Arial, sans-serif" font-size="20" text-anchor="middle" fill="#f6f0e8" font-weight="700">Lorekeeper</text>
+  <text x="140" y="238" font-family="Segoe UI, Arial, sans-serif" font-size="12" text-anchor="middle" fill="#f6f0e8">Guardianes de la historia</text>
 </svg>

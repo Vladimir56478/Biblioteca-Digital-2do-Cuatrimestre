@@ -7,6 +7,25 @@ Proyecto minimal con backend en FastAPI y frontend estático.
 - Frontend: `static/` con HTML/CSS/JS
 - Endpoints principales: `/api/authors`, `/api/books`, `/api/search`, `/api/reserve`
 
+## Estructura del proyecto
+
+El proyecto está dividido en dos partes claras:
+
+- `backend/`: contiene la lógica del servidor, la conexión a la base de datos y los endpoints de la API.
+- `static/`: contiene la interfaz web que se muestra al usuario en el navegador.
+
+### Por qué existe cada archivo
+
+- `README.md`: documenta cómo instalar, configurar y ejecutar la aplicación.
+- `requirements.txt`: lista las dependencias de Python necesarias para correr el backend.
+- `backend/main.py`: es el archivo central del backend. Define la API, la autenticación por roles, la gestión de libros, las reservas y el servicio de archivos estáticos.
+- `backend/db.py`: se encarga de crear y devolver el motor de conexión a MySQL usando variables de entorno.
+- `static/index.html`: define la estructura de la interfaz, incluyendo las vistas de cuenta, catálogo, reservas y administración.
+- `static/app.js`: contiene la lógica del frontend: login, registro, navegación, búsqueda, alta/edición de libros y reservas.
+- `static/styles.css`: define los estilos visuales de la aplicación para que la interfaz sea más usable.
+
+También se añadieron comentarios explicativos en los archivos principales para que sea más sencillo comprender qué hace cada parte del código.
+
 ## 1. Instalar dependencias
 
 ```powershell

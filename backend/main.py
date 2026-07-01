@@ -1,3 +1,9 @@
+"""API principal de Lorekeeper.
+
+Este módulo concentra la lógica del backend: define los endpoints para
+autenticación, gestión de libros, reservas y el montaje de archivos estáticos.
+"""
+
 import datetime
 import inspect
 import random
@@ -26,6 +32,7 @@ app.add_middleware(
 
 engine = get_engine()
 
+# Datos base para inicializar usuarios y permisos en la base al arrancar.
 ADMIN_EMAIL = 'Bibliotecario.fanoba@tecnica29de6.edu.ar'
 PROTECTED_ROUTE_ROLES = {
     '/api/books': {'Bibliotecario'},
@@ -56,6 +63,8 @@ DEFAULT_USERS = [
 VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 
+# Inicialización de esquema: garantizan que existan columnas y tablas necesarias
+# cuando el servicio se levanta por primera vez.
 def ensure_user_role_column():
     try:
         with engine.begin() as conn:
@@ -155,7 +164,7 @@ class StockReductionIn(BaseModel):
 
 
 def generate_res_code(conn) -> str:
-    # RES-XXXX where X is uppercase letter or digit
+    # Genera códigos de reserva en formato RES-XXXX donde X es letra mayúscula o dígito
     attempts = 0
     while True:
         suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
@@ -179,8 +188,9 @@ class SignupIn(BaseModel):
     Contraseña: str
 
 
+# Helpers de usuario y autorización
 def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
-    """Infer user type (Alumno/Profesor/Bibliotecario) from email format or stored role."""
+    """Inferir tipo de usuario (Alumno/Profesor/Bibliotecario) según el Gmail o el rol almacenado."""
     if stored_type:
         normalized = stored_type.strip().lower()
         if normalized == 'bibliotecario':
@@ -193,6 +203,7 @@ def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
     return 'Alumno' if '@alu.' in gmail.lower() else 'Profesor'
 
 
+# Funciones de ayuda para extraer identidad de la petición
 def get_request_identity(request: Request) -> tuple[int | None, str | None]:
     user_id = request.headers.get('x-user-id') or request.headers.get('X-User-Id')
     user_type = request.headers.get('x-user-type') or request.headers.get('X-User-Type')
@@ -253,6 +264,7 @@ def get_authenticated_user(
     return user
 
 
+# Registro de bajas técnicas de ejemplares
 def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int, motivo: str):
     motivo = motivo.strip()
     if motivo not in VALID_BAJA_MOTIVOS:
@@ -275,6 +287,7 @@ def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int
     )
 
 
+# Decorador para exigir roles y permisos en rutas
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
     def decorator(func):
         if inspect.iscoroutinefunction(func):
@@ -326,7 +339,7 @@ def list_authors():
 @require_role('Bibliotecario', require_admin_email=True)
 def add_book(request: Request, book: BookIn):
     with engine.begin() as conn:
-        # Insert safely using parameters
+        # Insertar de forma segura usando parámetros
         stmt = text(
             "INSERT INTO Libro (Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock)"
             " VALUES (:titulo, :editorial, :id_autor, :anio, :isbn, :sinopsis, :stock)"
@@ -480,21 +493,21 @@ def reserve(request: Request, data: ReserveIn):
     now = datetime.datetime.utcnow()
     exp = now + datetime.timedelta(days=2)
     with engine.begin() as conn:
-        # Check user state
+        # Verificar el estado del usuario
         u = conn.execute(text("SELECT Estado FROM Usuario WHERE ID_Usuario = :id"), {'id': data.ID_Usuario}).fetchone()
         if not u:
             raise HTTPException(status_code=404, detail='Usuario no encontrado')
         if u[0] == 'vetado':
             raise HTTPException(status_code=403, detail='Usuario vetado')
 
-        # Check stock
+        # Verificar stock disponible
         book = conn.execute(text("SELECT Stock FROM Libro WHERE ID_Libro = :id"), {'id': data.ID_Libro}).fetchone()
         if not book:
             raise HTTPException(status_code=404, detail='Libro no encontrado')
         if book[0] < data.Cantidad:
             raise HTTPException(status_code=400, detail='Stock insuficiente')
 
-        # Generate unique code
+        # Generar código de reserva único
         code = generate_res_code(conn)
 
         insert_stmt = text(
@@ -511,7 +524,7 @@ def reserve(request: Request, data: ReserveIn):
         }
         conn.execute(insert_stmt, params)
 
-        # Optionally decrement stock
+        # Reducir stock del libro reservado
         conn.execute(text("UPDATE Libro SET Stock = Stock - :c WHERE ID_Libro = :id"), {'c': data.Cantidad, 'id': data.ID_Libro})
 
         return {'ok': True, 'Codigo_reserva': code}
@@ -519,7 +532,7 @@ def reserve(request: Request, data: ReserveIn):
 
 @app.post('/api/login')
 def login(data: LoginIn):
-    """Login user with Gmail and Contraseña"""
+    """Iniciar sesión con Gmail y Contraseña"""
     with engine.connect() as conn:
         r = conn.execute(
             text("SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo FROM Usuario WHERE Gmail = :g AND Contraseña = :p"),
@@ -534,14 +547,14 @@ def login(data: LoginIn):
 
 @app.post('/api/signup')
 def signup(data: SignupIn):
-    """Create new user account. Automatically detects user type (Alumno/Profesor) from Gmail"""
+    """Crear nueva cuenta de usuario. Detecta automáticamente el tipo (Alumno/Profesor) según el Gmail."""
     tipo = infer_user_type(data.Gmail)
     with engine.begin() as conn:
-        # Check if Gmail already exists
+        # Verificar si el Gmail ya existe
         existing = conn.execute(text("SELECT 1 FROM Usuario WHERE Gmail = :g"), {'g': data.Gmail}).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail='El correo ya está registrado')
-        # Insert new user
+        # Insertar nuevo usuario
         stmt = text(
             "INSERT INTO Usuario (Nombre_Completo, Gmail, Contraseña, Estado, Tipo)"
             " VALUES (:nombre, :gmail, :contraseña, 'no vetado', :tipo)"

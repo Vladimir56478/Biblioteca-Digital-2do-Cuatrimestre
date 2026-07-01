@@ -1,4 +1,10 @@
-// Global state
+/*
+  Lógica del frontend de la biblioteca digital.
+  Controla la sesión del usuario, visibilidad de vistas, búsqueda de libros,
+  creación y edición de contenidos, reservas y comunicación con la API.
+*/
+
+// Estado global de la aplicación
 let authState = {
   isAuthenticated: false,
   ID_Usuario: null,
@@ -8,11 +14,11 @@ let authState = {
 
 let currentEditBookStock = null
 
-console.log('[APP] Script loaded')
+console.log('[APP] Script cargado')
 
-// Load auth state from localStorage
+// Cargar el estado de autenticación desde localStorage
 function loadAuthState() {
-  console.log('[AUTH] Loading auth state')
+  console.log('[AUTH] Cargando estado de autenticación')
   const stored = localStorage.getItem('authState')
   if (stored) {
     authState = JSON.parse(stored)
@@ -25,7 +31,7 @@ function loadAuthState() {
   }
 }
 
-// Save auth state to localStorage
+// Guardar el estado de autenticación en localStorage
 function saveAuthState() {
   localStorage.setItem('authState', JSON.stringify(authState))
 }
@@ -37,7 +43,7 @@ function getAuthHeaders(extra = {}) {
   return headers
 }
 
-// Logout
+// Cerrar sesión
 function logout() {
   authState = { isAuthenticated: false, ID_Usuario: null, Nombre_Completo: null, Tipo: null }
   localStorage.removeItem('authState')
@@ -45,7 +51,7 @@ function logout() {
   showView('account')
 }
 
-// Update UI visibility based on auth state
+// Actualizar visibilidad de la interfaz según la autenticación
 function updateUIBasedOnAuth() {
   console.log('[UI] Updating UI based on auth')
   const protectedItems = document.querySelectorAll('[data-protected="true"]')
@@ -90,7 +96,7 @@ function updateUIBasedOnAuth() {
   console.log('[UI] UI update complete')
 }
 
-// Show/hide view
+// Mostrar u ocultar vistas de la aplicación
 function showView(viewName) {
   try {
     if (viewName !== 'account' && !authState.isAuthenticated) {
@@ -119,7 +125,7 @@ function showView(viewName) {
   }
 }
 
-// Fetch authors for select
+// Obtener autores para los controles select
 async function fetchAuthors() {
   try {
     const res = await fetch('/api/authors')
@@ -173,10 +179,10 @@ async function loadEditBooks(query = '') {
         if (book) populateEditForm(book)
       })
     })
-    // Ensure we're on the list subtab after loading
+    // Asegurarse de que esté activa la subpestaña lista después de cargar
     switchEditSubtab('list')
   } catch (e) {
-    console.error('Error loading edit books:', e)
+    console.error('Error al cargar libros para editar:', e)
   }
 }
 
@@ -196,11 +202,11 @@ function populateEditForm(book) {
   if (authorSelect) {
     authorSelect.value = book.ID_Autor || ''
   }
-  // Switch to detail subtab so the user edits the selected book
+  // Cambiar a la subpestaña de detalle para que el usuario edite el libro seleccionado
   switchEditSubtab('detail')
 }
 
-// Switch between edit sub-tabs: 'list' or 'detail'
+// Cambiar entre subpestañas de edición: 'list' o 'detail'
 function switchEditSubtab(tab) {
   const list = document.getElementById('editListTab')
   const detail = document.getElementById('editDetailTab')
@@ -217,7 +223,7 @@ function switchEditSubtab(tab) {
   })
 }
 
-// Search books and display with ID
+// Buscar libros y mostrarlos con su ID
 async function doSearch() {
   const searchInput = document.getElementById('searchInput')
   if (!searchInput) return
@@ -252,11 +258,11 @@ async function doSearch() {
   }
 }
 
-// Setup all event listeners
+// Configurar todos los event listeners de la página
 function setupEventListeners() {
-  console.log('[EVENTS] Setting up event listeners')
+  console.log('[EVENTS] Configurando event listeners')
 
-  // Login
+  // Inicio de sesión
   const loginForm = document.getElementById('loginForm')
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
@@ -289,7 +295,7 @@ function setupEventListeners() {
     })
   }
 
-  // Signup
+  // Registro de cuenta
   const signupForm = document.getElementById('signupForm')
   if (signupForm) {
     signupForm.addEventListener('submit', async (e) => {
@@ -325,7 +331,7 @@ function setupEventListeners() {
     })
   }
 
-  // Auth tabs
+  // Pestañas de autenticación
   const authTabs = document.querySelectorAll('.auth-tab')
   authTabs.forEach(tab => {
     tab.addEventListener('click', (e) => {
@@ -334,7 +340,7 @@ function setupEventListeners() {
     })
   })
 
-  // Search
+  // Buscar libros
   const searchBtn = document.getElementById('searchBtn')
   if (searchBtn) {
     searchBtn.addEventListener('click', doSearch)
@@ -346,7 +352,7 @@ function setupEventListeners() {
     })
   }
 
-  // Book form
+  // Formulario de alta de libro
   const bookForm = document.getElementById('bookForm')
   if (bookForm) {
     bookForm.addEventListener('submit', async (e) => {
@@ -377,7 +383,7 @@ function setupEventListeners() {
     })
   }
 
-  // Reserve form
+  // Formulario de reserva
   const reserveForm = document.getElementById('reserveForm')
   if (reserveForm) {
     reserveForm.addEventListener('submit', async (e) => {
@@ -421,11 +427,11 @@ function setupEventListeners() {
     })
   }
 
-  // Edit view tab buttons
+  // Botones de pestañas en la vista de edición
   document.querySelectorAll('.edit-tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const t = btn.getAttribute('data-tab')
-      // If switching to the list tab, reload the books (show full list / current search)
+      // Si se cambia a la pestaña lista, recargar los libros (lista completa/búsqueda actual)
       if (t === 'list') {
         const editSearchInput = document.getElementById('editSearchInput')
         const q = editSearchInput ? editSearchInput.value : ''
@@ -439,7 +445,7 @@ function setupEventListeners() {
   const backToEditList = document.getElementById('backToEditList')
   if (backToEditList) {
     backToEditList.addEventListener('click', () => {
-      // Go back to list and refresh
+      // Volver a la lista y refrescar
       switchEditSubtab('list')
       const editSearchInput = document.getElementById('editSearchInput')
       loadEditBooks(editSearchInput?.value || '')
@@ -512,14 +518,14 @@ function setupEventListeners() {
     }
   }
 
-  console.log('[EVENTS] Event listeners setup complete')
+  console.log('[EVENTOS] Configuración de listeners completada')
 }
 
-// Navigation
+// Navegación
 function setupNavigation() {
-  console.log('[NAV] Setting up navigation')
+  console.log('[NAV] Configurando navegación')
   const navItems = document.querySelectorAll('.nav-item')
-  console.log('[NAV] Nav items found:', navItems.length)
+  console.log('[NAV] Elementos de navegación encontrados:', navItems.length)
   navItems.forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault()
@@ -532,37 +538,37 @@ function setupNavigation() {
       showView(view)
     })
   })
-  console.log('[NAV] Navigation setup complete')
+  console.log('[NAV] Configuración de navegación completada')
 }
 
-// Init function to setup all event listeners
+// Función de inicialización para configurar la app
 function initializeApp() {
-  console.log('[INIT] Initializing app')
+  console.log('[INIT] Inicializando app')
   setupEventListeners()
   setupNavigation()
   loadAuthState()
   fetchAuthors()
-  console.log('[INIT] App initialized')
+  console.log('[INIT] App inicializada')
 }
 
-// Wait for DOM to be ready
+// Esperar a que el DOM esté listo
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeApp)
 } else {
-  // DOM is already loaded (e.g., if script is loaded async)
+  // El DOM ya está cargado (por ejemplo, si el script es async)
   initializeApp()
 }
 
-// Also try to setup immediately if elements exist
+// También intentar configurar inmediatamente si los elementos ya existen
 try {
-  console.log('[APP] Attempting immediate setup...')
+  console.log('[APP] Intentando configuración inmediata...')
   const signupForm = document.getElementById('signupForm')
   if (signupForm && !signupForm.__setupDone) {
-    console.log('[APP] Setting up signup form immediately')
+    console.log('[APP] Configurando formulario de registro inmediatamente')
     signupForm.__setupDone = true
     signupForm.addEventListener('submit', async (e) => {
       e.preventDefault()
-      console.log('[SIGNUP] Form submitted')
+      console.log('[SIGNUP] Formulario enviado')
       const data = Object.fromEntries(new FormData(e.target).entries())
       const res = await fetch('/api/signup', {
         method: 'POST',
@@ -594,14 +600,13 @@ try {
     })
   }
 } catch (e) {
-  console.error('[APP] Error in immediate setup:', e)
-}
+    console.error('[APP] Error en la configuración inmediata:', e)
+  }
 
-console.log('[APP] Setup complete, waiting for DOM...')
+console.log('[APP] Configuración completa, esperando el DOM...')
+// Agregar interceptor global de envío de formularios
 
-// Add global form submit interceptor
 
-
-console.log('[APP] Global form interceptor added')
+console.log('[APP] Interceptor global de formularios agregado')
 
 
