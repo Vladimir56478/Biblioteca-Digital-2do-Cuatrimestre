@@ -63,25 +63,38 @@
             <input id="editSearchInput" placeholder="Buscar libro para editar" />
             <button id="editSearchBtn">Buscar</button>
           </div>
-          <section id="editResults" class="cards"></section>
 
-          <form id="editForm" style="display:none">
-            <input type="hidden" name="ID_Libro" id="editBookId" />
-            <input name="Titulo" id="editTitulo" placeholder="Titulo" required />
-            <input name="Editorial" id="editEditorial" placeholder="Editorial" />
-            <select name="ID_Autor" id="editAuthorSelect"><option value="">Seleccione autor</option></select>
-            <input name="Año_Publicacion" id="editAño_Publicacion" placeholder="Año de publicación" type="number" />
-            <input name="ISBN" id="editISBN" placeholder="ISBN" />
-            <textarea name="Sinopsis" id="editSinopsis" placeholder="Sinopsis"></textarea>
-            <input name="Stock" id="editStock" placeholder="Stock" type="number" min="0" />
-            <select name="Motivo" id="editMotivo" style="display:none">
-              <option value="">Seleccione motivo técnico</option>
-              <option value="Dañado">Dañado</option>
-              <option value="Extraviado">Extraviado</option>
-              <option value="Retirado">Retirado</option>
-            </select>
-            <button type="submit">Guardar cambios</button>
-          </form>
+          <!-- Subpestañas: Lista / Editar libro -->
+          <div class="edit-tabs" style="margin-top:10px; display:flex; gap:8px;">
+            <button type="button" class="edit-tab-btn" data-tab="list">Lista de libros</button>
+            <button type="button" class="edit-tab-btn" data-tab="detail">Editar libro</button>
+          </div>
+
+          <section id="editListTab" class="cards edit-subtab" style="margin-top:8px;"></section>
+
+          <section id="editDetailTab" class="edit-subtab" style="display:none; margin-top:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div style="font-weight:700">Editar libro</div>
+              <button type="button" id="backToEditList">Volver a la lista</button>
+            </div>
+            <form id="editForm" style="display:block">
+              <input type="hidden" name="ID_Libro" id="editBookId" />
+              <input name="Titulo" id="editTitulo" placeholder="Titulo" required />
+              <input name="Editorial" id="editEditorial" placeholder="Editorial" />
+              <select name="ID_Autor" id="editAuthorSelect"><option value="">Seleccione autor</option></select>
+              <input name="Año_Publicacion" id="editAño_Publicacion" placeholder="Año de publicación" type="number" />
+              <input name="ISBN" id="editISBN" placeholder="ISBN" />
+              <textarea name="Sinopsis" id="editSinopsis" placeholder="Sinopsis"></textarea>
+              <input name="Stock" id="editStock" placeholder="Stock" type="number" min="0" />
+              <select name="Motivo" id="editMotivo" style="display:none">
+                <option value="">Seleccione motivo técnico</option>
+                <option value="Dañado">Dañado</option>
+                <option value="Extraviado">Extraviado</option>
+                <option value="Retirado">Retirado</option>
+              </select>
+              <button type="submit">Guardar cambios</button>
+            </form>
+          </section>
           <div id="editMsg" class="msg"></div>
         </section>
 

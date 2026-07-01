@@ -141,7 +141,7 @@ async function fetchAuthors() {
 }
 
 async function loadEditBooks(query = '') {
-  const results = document.getElementById('editResults')
+  const results = document.getElementById('editListTab')
   if (!results) return
   try {
     const res = await fetch('/api/search?title=' + encodeURIComponent(query))
@@ -173,6 +173,8 @@ async function loadEditBooks(query = '') {
         if (book) populateEditForm(book)
       })
     })
+    // Ensure we're on the list subtab after loading
+    switchEditSubtab('list')
   } catch (e) {
     console.error('Error loading edit books:', e)
   }
@@ -194,7 +196,25 @@ function populateEditForm(book) {
   if (authorSelect) {
     authorSelect.value = book.ID_Autor || ''
   }
-  form.style.display = 'block'
+  // Switch to detail subtab so the user edits the selected book
+  switchEditSubtab('detail')
+}
+
+// Switch between edit sub-tabs: 'list' or 'detail'
+function switchEditSubtab(tab) {
+  const list = document.getElementById('editListTab')
+  const detail = document.getElementById('editDetailTab')
+  const tabButtons = document.querySelectorAll('.edit-tab-btn')
+  if (tab === 'detail') {
+    if (list) list.style.display = 'none'
+    if (detail) detail.style.display = 'block'
+  } else {
+    if (list) list.style.display = 'block'
+    if (detail) detail.style.display = 'none'
+  }
+  tabButtons.forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-tab') === tab)
+  })
 }
 
 // Search books and display with ID
@@ -398,6 +418,31 @@ function setupEventListeners() {
     })
     editSearchInput.addEventListener('keyup', (e) => {
       if (e.key === 'Enter') loadEditBooks(editSearchInput.value)
+    })
+  }
+
+  // Edit view tab buttons
+  document.querySelectorAll('.edit-tab-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const t = btn.getAttribute('data-tab')
+      // If switching to the list tab, reload the books (show full list / current search)
+      if (t === 'list') {
+        const editSearchInput = document.getElementById('editSearchInput')
+        const q = editSearchInput ? editSearchInput.value : ''
+        loadEditBooks(q)
+      } else {
+        switchEditSubtab(t)
+      }
+    })
+  })
+
+  const backToEditList = document.getElementById('backToEditList')
+  if (backToEditList) {
+    backToEditList.addEventListener('click', () => {
+      // Go back to list and refresh
+      switchEditSubtab('list')
+      const editSearchInput = document.getElementById('editSearchInput')
+      loadEditBooks(editSearchInput?.value || '')
     })
   }
 
