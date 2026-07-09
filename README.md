@@ -82,7 +82,7 @@ Si cambias `backend/.env` o necesitas aplicar un cambio, detén el servidor con 
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## 5. Abrir la app
+## 5. Abrir la app.
 
 En tu navegador local:
 
