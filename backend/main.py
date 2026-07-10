@@ -129,6 +129,42 @@ def ensure_baja_ejemplares_table():
 
 ensure_baja_ejemplares_table()
 
+VALID_LOG_TYPES = {'Reserva Creada', 'Préstamo Activo', 'Préstamo Devuelto', 'Stock Reducido'}
+
+
+def ensure_log_sistema_table():
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS Log_Sistema ("
+            "ID INT AUTO_INCREMENT PRIMARY KEY, "
+            "Tipo_Evento VARCHAR(50) NOT NULL, "
+            "ID_Usuario INT NOT NULL, "
+            "ID_Libro INT NOT NULL, "
+            "Descripcion TEXT, "
+            "Fecha DATETIME NOT NULL, "
+            "FOREIGN KEY (ID_Usuario) REFERENCES Usuario(ID_Usuario), "
+            "FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro)"
+            ") ENGINE=InnoDB"
+        ))
+
+        # Adaptar esquemas existentes: si la tabla antigua usaba ID_Log, renombrarla a ID.
+        has_id = conn.execute(text(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_sistema' AND COLUMN_NAME = 'ID'"
+        )).fetchone()
+        if not has_id:
+            has_id_log = conn.execute(text(
+                "SELECT 1 FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_sistema' AND COLUMN_NAME = 'ID_Log'"
+            )).fetchone()
+            if has_id_log:
+                conn.execute(text(
+                    "ALTER TABLE Log_Sistema CHANGE COLUMN ID_Log ID INT NOT NULL AUTO_INCREMENT"
+                ))
+
+
+ensure_log_sistema_table()
+
 
 class BookIn(BaseModel):
     Titulo: str = Field(..., max_length=100)
@@ -287,6 +323,24 @@ def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int
     )
 
 
+def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripcion: str | None = None):
+    if tipo_evento not in VALID_LOG_TYPES:
+        raise HTTPException(status_code=400, detail=f'Tipo de evento inválido: {tipo_evento}')
+    conn.execute(
+        text(
+            "INSERT INTO Log_Sistema (Tipo_Evento, ID_Usuario, ID_Libro, Descripcion, Fecha)"
+            " VALUES (:tipo, :id_usuario, :id_libro, :descripcion, :fecha)"
+        ),
+        {
+            'tipo': tipo_evento,
+            'id_usuario': usuario_id,
+            'id_libro': libro_id,
+            'descripcion': descripcion,
+            'fecha': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+    )
+
+
 # Decorador para exigir roles y permisos en rutas
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
     def decorator(func):
@@ -429,6 +483,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
                 params['stock'] = new_stock
                 conn.execute(text("UPDATE Libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
                 insert_baja_record(conn, book_id, user['ID_Usuario'], reduction, book.Motivo)
+                insert_log(conn, 'Stock Reducido', user['ID_Usuario'], book_id, f'Stock reducido: {reduction} ejemplar(es) - Motivo: {book.Motivo}')
                 return {'ok': True, 'updated': book_id, 'reduced': reduction}
             updates.append('Stock = :stock')
             params['stock'] = new_stock
@@ -456,6 +511,7 @@ def stock_reduction(request: Request, data: StockReductionIn):
             raise HTTPException(status_code=400, detail='Stock insuficiente para esta baja')
         conn.execute(text("UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id"), {'cantidad': data.Cantidad, 'id': data.ID_Libro})
         insert_baja_record(conn, data.ID_Libro, user['ID_Usuario'], data.Cantidad, motivo)
+        insert_log(conn, 'Stock Reducido', user['ID_Usuario'], data.ID_Libro, f'Stock reducido por baja técnica: {motivo}')
         return {'ok': True, 'ID_Libro': data.ID_Libro, 'Cantidad': data.Cantidad}
 
 
@@ -526,8 +582,104 @@ def reserve(request: Request, data: ReserveIn):
 
         # Reducir stock del libro reservado
         conn.execute(text("UPDATE Libro SET Stock = Stock - :c WHERE ID_Libro = :id"), {'c': data.Cantidad, 'id': data.ID_Libro})
+        insert_log(conn, 'Reserva Creada', data.ID_Usuario, data.ID_Libro, f'Reserva {code} de {data.Cantidad} ejemplar(es)')
+        insert_log(conn, 'Stock Reducido', data.ID_Usuario, data.ID_Libro, f'Stock reducido por reserva {code}')
 
         return {'ok': True, 'Codigo_reserva': code}
+
+
+@app.get('/api/logs')
+@require_role('Bibliotecario')
+def get_logs(request: Request, limit: int = 50):
+    if limit <= 0:
+        limit = 50
+    with engine.connect() as conn:
+        res = conn.execute(
+            text(
+                "SELECT l.ID, l.Tipo_Evento, l.ID_Usuario, u.Nombre_Completo, l.ID_Libro, lib.Titulo, l.Descripcion, l.Fecha "
+                "FROM Log_Sistema l "
+                "LEFT JOIN Usuario u ON l.ID_Usuario = u.ID_Usuario "
+                "LEFT JOIN Libro lib ON l.ID_Libro = lib.ID_Libro "
+                "ORDER BY l.Fecha DESC LIMIT :limit"
+            ),
+            {'limit': limit}
+        )
+        logs = []
+        for row in res.fetchall():
+            logs.append({
+                'ID': row[0],
+                'Tipo_Evento': row[1],
+                'ID_Usuario': row[2],
+                'Usuario': row[3],
+                'ID_Libro': row[4],
+                'Libro': row[5],
+                'Descripcion': row[6],
+                'Fecha': row[7].strftime('%Y-%m-%d %H:%M:%S') if row[7] else None,
+            })
+        return logs
+
+
+@app.get('/api/history/reservas')
+@require_role('Bibliotecario')
+def get_history_reservas(request: Request, limit: int = 50):
+    if limit <= 0:
+        limit = 50
+    with engine.connect() as conn:
+        res = conn.execute(
+            text(
+                "SELECT r.ID_Reserva, r.Codigo_reserva, r.ID_Libro, lib.Titulo, r.ID_Usuario, u.Nombre_Completo, r.Cantidad, r.Fecha_Reserva, r.Fecha_Expiracion_Reserva "
+                "FROM Reserva_Ejemplares r "
+                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
+                "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
+                "ORDER BY r.ID_Reserva DESC LIMIT :limit"
+            ),
+            {'limit': limit}
+        )
+        records = []
+        for row in res.fetchall():
+            records.append({
+                'ID_Reserva': row[0],
+                'Codigo_reserva': row[1],
+                'ID_Libro': row[2],
+                'Libro': row[3],
+                'ID_Usuario': row[4],
+                'Usuario': row[5],
+                'Cantidad': row[6],
+                'Fecha_Reserva': row[7].strftime('%Y-%m-%d %H:%M:%S') if row[7] else None,
+                'Fecha_Expiracion_Reserva': row[8].strftime('%Y-%m-%d %H:%M:%S') if row[8] else None,
+            })
+        return records
+
+
+@app.get('/api/history/bajas')
+@require_role('Bibliotecario')
+def get_history_bajas(request: Request, limit: int = 50):
+    if limit <= 0:
+        limit = 50
+    with engine.connect() as conn:
+        res = conn.execute(
+            text(
+                "SELECT b.ID_Baja, b.ID_Libro, lib.Titulo, b.ID_Usuario_Bibliotecario, u.Nombre_Completo, b.Cantidad, b.Motivo, b.Fecha "
+                "FROM Baja_Ejemplares b "
+                "LEFT JOIN Usuario u ON b.ID_Usuario_Bibliotecario = u.ID_Usuario "
+                "LEFT JOIN Libro lib ON b.ID_Libro = lib.ID_Libro "
+                "ORDER BY b.ID_Baja DESC LIMIT :limit"
+            ),
+            {'limit': limit}
+        )
+        records = []
+        for row in res.fetchall():
+            records.append({
+                'ID_Baja': row[0],
+                'ID_Libro': row[1],
+                'Libro': row[2],
+                'ID_Usuario_Bibliotecario': row[3],
+                'Usuario': row[4],
+                'Cantidad': row[5],
+                'Motivo': row[6],
+                'Fecha': row[7].strftime('%Y-%m-%d %H:%M:%S') if row[7] else None,
+            })
+        return records
 
 
 @app.post('/api/login')

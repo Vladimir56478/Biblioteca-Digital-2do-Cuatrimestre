@@ -13,6 +13,7 @@ let authState = {
 }
 
 let currentEditBookStock = null
+let historyCurrentTab = 'reservas'
 
 console.log('[APP] Script cargado')
 
@@ -120,8 +121,26 @@ function showView(viewName) {
     if (viewName === 'edit') {
       loadEditBooks()
     }
+    if (viewName === 'history') {
+      loadHistoryLogs()
+    }
   } catch (e) {
     console.error('Error in showView:', e)
+  }
+}
+
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab)
+  })
+  const loginForm = document.getElementById('loginForm')
+  const signupForm = document.getElementById('signupForm')
+  if (tab === 'signup') {
+    if (loginForm) loginForm.style.display = 'none'
+    if (signupForm) signupForm.style.display = 'block'
+  } else {
+    if (loginForm) loginForm.style.display = 'block'
+    if (signupForm) signupForm.style.display = 'none'
   }
 }
 
@@ -163,7 +182,7 @@ async function loadEditBooks(query = '') {
       card.innerHTML = `
         <div class="thumb"></div>
         <div style="flex:1">
-          <div style="font-weight:700; color:var(--accent); margin-bottom:4px"><span style="font-size:12px; background:#e8e8e8; padding:2px 6px; border-radius:4px;">#${it.ID_Libro}</span> ${it.Titulo}</div>
+          <div style="font-weight:700; color:var(--accent); margin-bottom:4px">${it.Titulo}</div>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
           <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
@@ -224,6 +243,139 @@ function switchEditSubtab(tab) {
 }
 
 // Buscar libros y mostrarlos con su ID
+async function renderHistoryTable(columns, rows, container, msg) {
+  if (!container) return
+  container.innerHTML = ''
+  if (msg) msg.textContent = ''
+
+  if (!rows.length) {
+    container.innerHTML = '<p>No hay registros para mostrar.</p>'
+    return
+  }
+
+  const table = document.createElement('table')
+  table.className = 'history-table'
+
+  const thead = document.createElement('thead')
+  const headerRow = document.createElement('tr')
+  columns.forEach(col => {
+    const th = document.createElement('th')
+    th.textContent = col.label
+    headerRow.appendChild(th)
+  })
+  thead.appendChild(headerRow)
+  table.appendChild(thead)
+
+  const tbody = document.createElement('tbody')
+  rows.forEach(rowData => {
+    const row = document.createElement('tr')
+    columns.forEach(col => {
+      const td = document.createElement('td')
+      const value = rowData[col.key]
+      td.textContent = value != null ? value : '-'
+      row.appendChild(td)
+    })
+    tbody.appendChild(row)
+  })
+  table.appendChild(tbody)
+  container.appendChild(table)
+}
+
+function switchHistorySubtab(tab) {
+  historyCurrentTab = tab
+  document.querySelectorAll('.history-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab)
+  })
+  const reservasEl = document.getElementById('history-reservas')
+  const bajasEl = document.getElementById('history-bajas')
+  if (tab === 'reservas') {
+    if (reservasEl) reservasEl.style.display = 'block'
+    if (bajasEl) bajasEl.style.display = 'none'
+    loadHistoryReservas()
+  } else {
+    if (reservasEl) reservasEl.style.display = 'none'
+    if (bajasEl) bajasEl.style.display = 'block'
+    loadHistoryBajas()
+  }
+}
+
+async function loadHistoryLogs() {
+  switchHistorySubtab(historyCurrentTab)
+}
+
+async function loadHistoryReservas() {
+  const container = document.getElementById('history-reservas')
+  const msg = document.getElementById('historyMsg')
+  if (!container) return
+  if (msg) msg.textContent = ''
+
+  try {
+    const res = await fetch('/api/history/reservas?limit=50', {
+      headers: getAuthHeaders()
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (msg) {
+        msg.textContent = 'Error cargando reservas: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return
+    }
+
+    const columns = [
+      { key: 'Codigo_reserva', label: 'Código' },
+      { key: 'Fecha_Reserva', label: 'Fecha reserva' },
+      { key: 'Fecha_Expiracion_Reserva', label: 'Fecha expiración' },
+      { key: 'Usuario', label: 'Usuario' },
+      { key: 'Libro', label: 'Libro' },
+      { key: 'Cantidad', label: 'Cantidad' }
+    ]
+    renderHistoryTable(columns, data, container, msg)
+  } catch (e) {
+    console.error('Error al cargar reservas:', e)
+    if (msg) {
+      msg.textContent = 'Error cargando reservas'
+      msg.style.color = 'red'
+    }
+  }
+}
+
+async function loadHistoryBajas() {
+  const container = document.getElementById('history-bajas')
+  const msg = document.getElementById('historyMsg')
+  if (!container) return
+  if (msg) msg.textContent = ''
+
+  try {
+    const res = await fetch('/api/history/bajas?limit=50', {
+      headers: getAuthHeaders()
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (msg) {
+        msg.textContent = 'Error cargando bajas: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return
+    }
+
+    const columns = [
+      { key: 'Fecha', label: 'Fecha' },
+      { key: 'Libro', label: 'Libro' },
+      { key: 'Cantidad', label: 'Cantidad' },
+      { key: 'Motivo', label: 'Motivo' }
+    ]
+    renderHistoryTable(columns, data, container, msg)
+  } catch (e) {
+    console.error('Error al cargar bajas:', e)
+    if (msg) {
+      msg.textContent = 'Error cargando bajas de stock'
+      msg.style.color = 'red'
+    }
+  }
+}
+
+
 async function doSearch() {
   const searchInput = document.getElementById('searchInput')
   if (!searchInput) return
@@ -245,17 +397,34 @@ async function doSearch() {
       card.innerHTML = `
         <div class="thumb"></div>
         <div style="flex:1">
-          <div style="font-weight:700; color:var(--accent); margin-bottom:4px"><span style="font-size:12px; background:#e8e8e8; padding:2px 6px; border-radius:4px;">#${it.ID_Libro}</span> ${it.Titulo}</div>
+          <div style="font-weight:700; color:var(--accent); margin-bottom:4px;">${it.Titulo}</div>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
           <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
+          <button type="button" class="reserve-btn" data-titulo="${it.Titulo}" style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
         </div>
       `
       container.appendChild(card)
     })
+    // Agregar event listeners a los botones de reserva
+    document.querySelectorAll('.reserve-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        const titulo = btn.getAttribute('data-titulo')
+        preFillAndShowReserveForm(titulo)
+      })
+    })
   } catch (e) {
     console.error('Error searching:', e)
   }
+}
+
+function preFillAndShowReserveForm(titulo) {
+  const tituloInput = document.getElementById('reserveTitulo')
+  if (tituloInput) {
+    tituloInput.value = titulo
+  }
+  showView('reserve')
 }
 
 // Configurar todos los event listeners de la página
@@ -390,7 +559,7 @@ function setupEventListeners() {
       e.preventDefault()
       const formData = Object.fromEntries(new FormData(e.target).entries())
       const data = {
-        ID_Libro: Number(formData.ID_Libro),
+        Titulo: formData.Titulo.trim(),
         ID_Usuario: authState.ID_Usuario,
         Cantidad: Number(formData.Cantidad)
       }
@@ -406,13 +575,25 @@ function setupEventListeners() {
           msg.textContent = 'Reserva: ' + j.Codigo_reserva
           msg.style.color = 'green'
         }
+        e.target.reset()
       } else {
         if (msg) {
           msg.textContent = 'Error: ' + (j.detail || 'Error')
           msg.style.color = 'red'
         }
       }
-      e.target.reset()
+    })
+  }
+
+  // Botón para limpiar título pre-rellenado
+  const clearTituloBtn = document.getElementById('clearTituloBtn')
+  if (clearTituloBtn) {
+    clearTituloBtn.addEventListener('click', () => {
+      const tituloInput = document.getElementById('reserveTitulo')
+      if (tituloInput) {
+        tituloInput.value = ''
+        tituloInput.focus()
+      }
     })
   }
 
@@ -442,6 +623,13 @@ function setupEventListeners() {
     })
   })
 
+  document.querySelectorAll('.history-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab')
+      switchHistorySubtab(tab)
+    })
+  })
+
   const backToEditList = document.getElementById('backToEditList')
   if (backToEditList) {
     backToEditList.addEventListener('click', () => {
@@ -453,6 +641,38 @@ function setupEventListeners() {
   }
 
   const editForm = document.getElementById('editForm')
+  const deleteBookBtn = document.getElementById('deleteBookBtn')
+  if (deleteBookBtn) {
+    deleteBookBtn.addEventListener('click', async () => {
+      const bookId = Number(document.getElementById('editBookId').value)
+      if (!bookId) return
+      if (!confirm('¿Eliminar este libro y todos los registros asociados? Esta acción no se puede deshacer.')) return
+      try {
+        const res = await fetch('/api/books/' + bookId, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        })
+        const j = await res.json()
+        const msg = document.getElementById('editMsg')
+        if (res.ok) {
+          if (msg) {
+            msg.textContent = 'Libro eliminado correctamente'
+            msg.style.color = 'green'
+          }
+          switchEditSubtab('list')
+          loadEditBooks(editSearchInput?.value || '')
+        } else {
+          if (msg) {
+            msg.textContent = 'Error: ' + (j.detail || 'Error')
+            msg.style.color = 'red'
+          }
+        }
+      } catch (e) {
+        console.error('Error eliminando libro:', e)
+      }
+    })
+  }
+
   if (editForm) {
     editForm.addEventListener('submit', async (e) => {
       e.preventDefault()
@@ -518,15 +738,57 @@ function setupEventListeners() {
     }
   }
 
-  console.log('[EVENTOS] Configuración de listeners completada')
+  const clearReservasBtn = document.getElementById('clearReservasBtn')
+  const clearBajasBtn = document.getElementById('clearBajasBtn')
+  if (clearReservasBtn) {
+    clearReservasBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar todos los registros de reservas del historial?')) return
+      const res = await fetch('/api/history/reservas', {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      })
+      const j = await res.json()
+      const msg = document.getElementById('historyMsg')
+      if (res.ok) {
+        if (msg) {
+          msg.textContent = 'Historial de reservas eliminado.'
+          msg.style.color = 'green'
+        }
+        if (historyCurrentTab === 'reservas') loadHistoryReservas()
+      } else if (msg) {
+        msg.textContent = 'Error: ' + (j.detail || 'Error')
+        msg.style.color = 'red'
+      }
+    })
+  }
+  if (clearBajasBtn) {
+    clearBajasBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar todos los registros de bajas de stock?')) return
+      const res = await fetch('/api/history/bajas', {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      })
+      const j = await res.json()
+      const msg = document.getElementById('historyMsg')
+      if (res.ok) {
+        if (msg) {
+          msg.textContent = 'Historial de bajas eliminado.'
+          msg.style.color = 'green'
+        }
+        if (historyCurrentTab === 'bajas') loadHistoryBajas()
+      } else if (msg) {
+        msg.textContent = 'Error: ' + (j.detail || 'Error')
+        msg.style.color = 'red'
+      }
+    })
+  }
+
+  console.log('[EVENTS] Event listeners registered')
 }
 
-// Navegación
 function setupNavigation() {
   console.log('[NAV] Configurando navegación')
-  const navItems = document.querySelectorAll('.nav-item')
-  console.log('[NAV] Elementos de navegación encontrados:', navItems.length)
-  navItems.forEach(a => {
+  document.querySelectorAll('.nav-item').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault()
       const view = a.getAttribute('data-view')
