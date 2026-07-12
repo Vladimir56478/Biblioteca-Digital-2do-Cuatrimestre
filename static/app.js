@@ -1,10 +1,10 @@
 /*
-  Lógica del frontend de la biblioteca digital.
-  Controla la sesión del usuario, visibilidad de vistas, búsqueda de libros,
-  creación y edición de contenidos, reservas y comunicación con la API.
+  Lógica de la interfaz de la biblioteca digital.
+  Controla el login, los permisos por rol, la búsqueda de libros,
+  la edición del catálogo, las reservas y la comunicación con la API del backend.
 */
 
-// Estado global de la aplicación
+// Estado global de la app para conservar la sesión del usuario entre recargas de la página.
 let authState = {
   isAuthenticated: false,
   ID_Usuario: null,
@@ -15,16 +15,12 @@ let authState = {
 let currentEditBookStock = null
 let historyCurrentTab = 'reservas'
 
-console.log('[APP] Script cargado')
-
-// Cargar el estado de autenticación desde localStorage
+// Recupera la sesión guardada en el navegador para volver a entrar a la app sin pedir login otra vez.
 function loadAuthState() {
-  console.log('[AUTH] Cargando estado de autenticación')
   const stored = localStorage.getItem('authState')
   if (stored) {
     authState = JSON.parse(stored)
   }
-  console.log('[AUTH] Auth state loaded:', authState.isAuthenticated)
   updateUIBasedOnAuth()
   if (authState.isAuthenticated) {
     showView('home')
@@ -32,7 +28,7 @@ function loadAuthState() {
   }
 }
 
-// Guardar el estado de autenticación en localStorage
+// Guarda la sesión actual para que los datos del usuario sigan disponibles en esa misma máquina.
 function saveAuthState() {
   localStorage.setItem('authState', JSON.stringify(authState))
 }
@@ -52,14 +48,16 @@ function logout() {
   showView('account')
 }
 
-// Actualizar visibilidad de la interfaz según la autenticación
+function setItemVisibility(item, isVisible) {
+  item.style.opacity = isVisible ? '1' : '0.35'
+  item.style.pointerEvents = isVisible ? 'auto' : 'none'
+  item.style.cursor = isVisible ? 'pointer' : 'not-allowed'
+}
+
+// Ajusta qué elementos se ven según el rol del usuario y si ya inició sesión.
 function updateUIBasedOnAuth() {
-  console.log('[UI] Updating UI based on auth')
   const protectedItems = document.querySelectorAll('[data-protected="true"]')
-  console.log('[UI] Found protected items:', protectedItems.length)
   const welcome = document.getElementById('welcome')
-  console.log('[UI] Welcome element:', welcome ? 'found' : 'NOT FOUND')
-  
   const normalizedRole = authState.Tipo ? authState.Tipo.trim() : ''
   const isUser = normalizedRole === 'Alumno' || normalizedRole === 'Profesor' || normalizedRole === 'Bibliotecario'
 
@@ -74,9 +72,7 @@ function updateUIBasedOnAuth() {
       } else {
         isVisible = normalizedRole === requiredRole
       }
-      item.style.opacity = isVisible ? '1' : '0.35'
-      item.style.pointerEvents = isVisible ? 'auto' : 'none'
-      item.style.cursor = isVisible ? 'pointer' : 'not-allowed'
+      setItemVisibility(item, isVisible)
     })
     if (welcome) {
       welcome.style.display = 'block'
@@ -85,19 +81,14 @@ function updateUIBasedOnAuth() {
       welcome.onclick = logout
     }
   } else {
-    protectedItems.forEach(item => {
-      item.style.opacity = '0.4'
-      item.style.pointerEvents = 'none'
-      item.style.cursor = 'not-allowed'
-    })
+    protectedItems.forEach(item => setItemVisibility(item, false))
     if (welcome) {
       welcome.style.display = 'none'
     }
   }
-  console.log('[UI] UI update complete')
 }
 
-// Mostrar u ocultar vistas de la aplicación
+// Cambia entre las vistas principales de la app y bloquea el acceso a las pantallas reservadas al bibliotecario.
 function showView(viewName) {
   try {
     if (viewName !== 'account' && !authState.isAuthenticated) {
@@ -132,7 +123,7 @@ function showView(viewName) {
   }
 }
 
-// Obtener autores para los controles select
+// Carga los autores disponibles para completar los formularios de alta y edición de libros.
 async function fetchAuthors() {
   try {
     const res = await fetch('/api/authors')
@@ -153,18 +144,29 @@ async function fetchAuthors() {
   }
 }
 
-async function loadEditBooks(query = '') {
+const editState = { page: 1, limit: 4, pages: 1, query: '' }
+
+// Solicita los libros que pueden editarse y arma la lista paginada para la vista de administración.
+async function loadEditBooks(query = '', page = 1) {
   const results = document.getElementById('editListTab')
+  const pagination = document.getElementById('editPagination')
   if (!results) return
+  editState.query = query
   try {
-    const res = await fetch('/api/search?title=' + encodeURIComponent(query))
-    const items = await res.json()
+    const res = await fetch('/api/search?title=' + encodeURIComponent(query) + '&page=' + page + '&limit=' + editState.limit)
+    const data = await res.json()
     results.innerHTML = ''
-    if (!items.length) {
-      results.innerHTML = '<p>No se encontraron libros para editar</p>'
+    if (!res.ok) {
+      results.innerHTML = '<p>Error cargando libros para editar</p>'
+      if (pagination) pagination.innerHTML = ''
       return
     }
-    items.forEach(it => {
+    if (!data.books || data.books.length === 0) {
+      results.innerHTML = '<p>No se encontraron libros para editar</p>'
+      if (pagination) pagination.innerHTML = ''
+      return
+    }
+    data.books.forEach(it => {
       const card = document.createElement('div')
       card.className = 'card'
       card.innerHTML = `
@@ -182,14 +184,20 @@ async function loadEditBooks(query = '') {
     document.querySelectorAll('.edit-book-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const bookId = Number(btn.getAttribute('data-id'))
-        const book = items.find(item => item.ID_Libro === bookId)
+        const book = data.books.find(item => item.ID_Libro === bookId)
         if (book) populateEditForm(book)
       })
     })
-    // Asegurarse de que esté activa la subpestaña lista después de cargar
+    editState.page = data.page
+    editState.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => loadEditBooks(query, newPage))
+    }
     switchEditSubtab('list')
   } catch (e) {
     console.error('Error al cargar libros para editar:', e)
+    results.innerHTML = '<p>Error cargando libros para editar</p>'
+    if (pagination) pagination.innerHTML = ''
   }
 }
 
@@ -230,7 +238,7 @@ function switchEditSubtab(tab) {
   })
 }
 
-// Buscar libros y mostrarlos con su ID
+// Construye una tabla dinámica para mostrar el historial de reservas y bajas con formato consistente.
 async function renderHistoryTable(columns, rows, container, msg) {
   if (!container) return
   container.innerHTML = ''
@@ -291,14 +299,20 @@ async function loadHistoryLogs() {
   switchHistorySubtab(historyCurrentTab)
 }
 
-async function loadHistoryReservas() {
+const historyState = {
+  reservas: { page: 1, limit: 10, pages: 1 },
+  bajas: { page: 1, limit: 10, pages: 1 }
+}
+
+async function loadHistoryReservas(page = 1) {
   const container = document.getElementById('history-reservas')
+  const pagination = document.getElementById('historyReservasPagination')
   const msg = document.getElementById('historyMsg')
   if (!container) return
   if (msg) msg.textContent = ''
 
   try {
-    const res = await fetch('/api/history/reservas?limit=50', {
+    const res = await fetch('/api/history/reservas?page=' + page + '&limit=' + historyState.reservas.limit, {
       headers: getAuthHeaders()
     })
     const data = await res.json()
@@ -318,7 +332,12 @@ async function loadHistoryReservas() {
       { key: 'Libro', label: 'Libro' },
       { key: 'Cantidad', label: 'Cantidad' }
     ]
-    renderHistoryTable(columns, data, container, msg)
+    renderHistoryTable(columns, data.reservas || [], container, msg)
+    historyState.reservas.page = data.page
+    historyState.reservas.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => loadHistoryReservas(newPage))
+    }
   } catch (e) {
     console.error('Error al cargar reservas:', e)
     if (msg) {
@@ -328,14 +347,15 @@ async function loadHistoryReservas() {
   }
 }
 
-async function loadHistoryBajas() {
+async function loadHistoryBajas(page = 1) {
   const container = document.getElementById('history-bajas')
+  const pagination = document.getElementById('historyBajasPagination')
   const msg = document.getElementById('historyMsg')
   if (!container) return
   if (msg) msg.textContent = ''
 
   try {
-    const res = await fetch('/api/history/bajas?limit=50', {
+    const res = await fetch('/api/history/bajas?page=' + page + '&limit=' + historyState.bajas.limit, {
       headers: getAuthHeaders()
     })
     const data = await res.json()
@@ -353,7 +373,12 @@ async function loadHistoryBajas() {
       { key: 'Cantidad', label: 'Cantidad' },
       { key: 'Motivo', label: 'Motivo' }
     ]
-    renderHistoryTable(columns, data, container, msg)
+    renderHistoryTable(columns, data.bajas || [], container, msg)
+    historyState.bajas.page = data.page
+    historyState.bajas.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => loadHistoryBajas(newPage))
+    }
   } catch (e) {
     console.error('Error al cargar bajas:', e)
     if (msg) {
@@ -364,22 +389,58 @@ async function loadHistoryBajas() {
 }
 
 
-async function doSearch() {
+const searchState = { page: 1, limit: 4, total: 0, pages: 1 }
+
+function renderPagination(container, page, pages, onPageClick) {
+  if (!container) return
+  container.innerHTML = ''
+  if (pages <= 1) return
+
+  const prev = document.createElement('button')
+  prev.textContent = 'Anterior'
+  prev.disabled = page <= 1
+  prev.addEventListener('click', () => onPageClick(page - 1))
+  container.appendChild(prev)
+
+  for (let i = 1; i <= pages; i += 1) {
+    const btn = document.createElement('button')
+    btn.textContent = String(i)
+    btn.className = i === page ? 'active' : ''
+    btn.disabled = i === page
+    btn.addEventListener('click', () => onPageClick(i))
+    container.appendChild(btn)
+  }
+
+  const next = document.createElement('button')
+  next.textContent = 'Siguiente'
+  next.disabled = page >= pages
+  next.addEventListener('click', () => onPageClick(page + 1))
+  container.appendChild(next)
+}
+
+// Consulta la API del catálogo y arma las tarjetas del buscador con stock y botón de reserva.
+async function doSearch(page = 1) {
   const searchInput = document.getElementById('searchInput')
   if (!searchInput) return
   const q = searchInput.value
   const container = document.getElementById('results')
+  const pagination = document.getElementById('resultsPagination')
   if (!container) return
   
   try {
-    const res = await fetch('/api/search?title=' + encodeURIComponent(q))
-    const items = await res.json()
+    const res = await fetch('/api/search?title=' + encodeURIComponent(q) + '&page=' + page + '&limit=' + searchState.limit)
+    const data = await res.json()
     container.innerHTML = ''
-    if (items.length === 0) {
-      container.innerHTML = '<p>No se encontraron libros</p>'
+    if (!res.ok) {
+      container.innerHTML = '<p>Error cargando catálogo.</p>'
       return
     }
-    items.forEach(it => {
+    if (!data.books || data.books.length === 0) {
+      container.innerHTML = '<p>No se encontraron libros</p>'
+      pagination.innerHTML = ''
+      return
+    }
+    data.books.forEach(it => {
       const card = document.createElement('div')
       card.className = 'card'
       card.innerHTML = `
@@ -389,55 +450,71 @@ async function doSearch() {
           <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
           <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
-          <button type="button" class="reserve-btn" data-titulo="${it.Titulo}" style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
+          <button type="button" class="reserve-btn" data-id="${it.ID_Libro}" data-titulo="${it.Titulo}" style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
         </div>
       `
       container.appendChild(card)
     })
-    // Agregar event listeners a los botones de reserva
     document.querySelectorAll('.reserve-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault()
         const titulo = btn.getAttribute('data-titulo')
-        preFillAndShowReserveForm(titulo)
+        const bookId = Number(btn.getAttribute('data-id'))
+        preFillAndShowReserveForm(titulo, bookId)
       })
     })
+    searchState.page = data.page
+    searchState.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => doSearch(newPage))
+    }
   } catch (e) {
     console.error('Error searching:', e)
+    if (container) {
+      container.innerHTML = '<p>Error cargando catálogo.</p>'
+    }
   }
 }
 
-function preFillAndShowReserveForm(titulo) {
+function preFillAndShowReserveForm(titulo, bookId) {
   const tituloInput = document.getElementById('reserveTitulo')
+  const bookIdInput = document.getElementById('reserveBookId')
   if (tituloInput) {
     tituloInput.value = titulo
+  }
+  if (bookIdInput) {
+    bookIdInput.value = bookId || ''
   }
   showView('reserve')
 }
 
-// Cargar tabla de perfiles de usuarios
-async function loadProfiles() {
+// Mantiene el estado de paginación de la tabla de usuarios para navegar entre páginas de perfiles.
+const profilesState = { page: 1, limit: 10, pages: 1 }
+
+async function loadProfiles(page = 1) {
   const container = document.getElementById('profilesContainer')
+  const pagination = document.getElementById('profilesPagination')
   const msg = document.getElementById('profilesMsg')
   if (!container) return
   if (msg) msg.textContent = ''
 
   try {
-    const res = await fetch('/api/users?role=all', {
+    const res = await fetch('/api/users?role=all&page=' + page + '&limit=' + profilesState.limit, {
       headers: getAuthHeaders()
     })
-    const users = await res.json()
+    const data = await res.json()
     if (!res.ok) {
       if (msg) {
-        msg.textContent = 'Error cargando perfiles: ' + (users.detail || 'Error')
+        msg.textContent = 'Error cargando perfiles: ' + (data.detail || 'Error')
         msg.style.color = 'red'
       }
       return
     }
 
     container.innerHTML = ''
-    if (!users || !Array.isArray(users) || users.length === 0) {
+    if (!data.users || !Array.isArray(data.users) || data.users.length === 0) {
       container.innerHTML = '<p>No hay usuarios registrados</p>'
+      if (pagination) pagination.innerHTML = ''
       return
     }
 
@@ -457,7 +534,7 @@ async function loadProfiles() {
     table.appendChild(thead)
 
     const tbody = document.createElement('tbody')
-    users.forEach(user => {
+    data.users.forEach(user => {
       const row = document.createElement('tr')
       
       const nameCell = document.createElement('td')
@@ -487,7 +564,10 @@ async function loadProfiles() {
         unbanBtn.style.padding = '6px 12px'
         unbanBtn.style.borderRadius = '4px'
         unbanBtn.style.cursor = 'pointer'
-        unbanBtn.addEventListener('click', () => unbanUser(user.ID_Usuario))
+        unbanBtn.addEventListener('click', async () => {
+          await unbanUser(user.ID_Usuario)
+          loadProfiles(page)
+        })
         actionCell.appendChild(unbanBtn)
       } else {
         const banBtn = document.createElement('button')
@@ -499,7 +579,10 @@ async function loadProfiles() {
         banBtn.style.padding = '6px 12px'
         banBtn.style.borderRadius = '4px'
         banBtn.style.cursor = 'pointer'
-        banBtn.addEventListener('click', () => banUser(user.ID_Usuario))
+        banBtn.addEventListener('click', async () => {
+          await banUser(user.ID_Usuario)
+          loadProfiles(page)
+        })
         actionCell.appendChild(banBtn)
       }
       row.appendChild(actionCell)
@@ -507,6 +590,12 @@ async function loadProfiles() {
     })
     table.appendChild(tbody)
     container.appendChild(table)
+
+    profilesState.page = data.page
+    profilesState.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => loadProfiles(newPage))
+    }
   } catch (e) {
     console.error('Error cargando perfiles:', e)
     if (msg) {
@@ -578,9 +667,9 @@ async function unbanUser(userId) {
   }
 }
 
-// Configurar todos los event listeners de la página
+// Conecta formularios, botones y enlaces con las funciones de la interfaz para que respondan a la interacción del usuario.
 function setupEventListeners() {
-  console.log('[EVENTS] Configurando event listeners')
+  // Se preparan los controles de la interfaz al cargar la página.
 
   // Inicio de sesión
   const loginForm = document.getElementById('loginForm')
@@ -709,10 +798,41 @@ function setupEventListeners() {
     reserveForm.addEventListener('submit', async (e) => {
       e.preventDefault()
       const formData = Object.fromEntries(new FormData(e.target).entries())
+      // Si no se proporcionó ID_Libro, intentar resolver por título (case-insensitive)
+      let libroId = Number(formData.ID_Libro)
+      const tituloIngresado = (formData.Titulo || '').trim()
+      if ((!libroId || libroId === 0) && tituloIngresado) {
+        try {
+          const sres = await fetch('/api/search?title=' + encodeURIComponent(tituloIngresado) + '&limit=10')
+          const sdata = await sres.json()
+          if (sres.ok && Array.isArray(sdata.books) && sdata.books.length > 0) {
+            const titleLower = tituloIngresado.toLowerCase()
+            // Preferir coincidencia exacta ignorando mayúsculas
+            const exact = sdata.books.find(b => (b.Titulo || '').toLowerCase() === titleLower)
+            if (exact) {
+              libroId = exact.ID_Libro
+            } else if (sdata.books.length === 1) {
+              // Si solo hay un resultado, usarlo
+              libroId = sdata.books[0].ID_Libro
+            }
+          }
+        } catch (err) {
+          console.error('Error buscando libro por título antes de reservar:', err)
+        }
+      }
+
       const data = {
-        Titulo: formData.Titulo.trim(),
+        ID_Libro: Number(libroId),
         ID_Usuario: authState.ID_Usuario,
         Cantidad: Number(formData.Cantidad)
+      }
+      const msg = document.getElementById('reserveMsg')
+      if (!data.ID_Libro) {
+        if (msg) {
+          msg.textContent = 'Error: Debes seleccionar un libro desde el catálogo antes de reservar.'
+          msg.style.color = 'red'
+        }
+        return
       }
       const res = await fetch('/api/reserve', {
         method: 'POST',
@@ -720,7 +840,6 @@ function setupEventListeners() {
         body: JSON.stringify(data)
       })
       const j = await res.json()
-      const msg = document.getElementById('reserveMsg')
       if (res.ok) {
         if (msg) {
           msg.textContent = 'Reserva: ' + j.Codigo_reserva
@@ -729,7 +848,8 @@ function setupEventListeners() {
         e.target.reset()
       } else {
         if (msg) {
-          msg.textContent = 'Error: ' + (j.detail || 'Error')
+          const detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+          msg.textContent = 'Error: ' + (detail || 'Error')
           msg.style.color = 'red'
         }
       }
@@ -741,9 +861,13 @@ function setupEventListeners() {
   if (clearTituloBtn) {
     clearTituloBtn.addEventListener('click', () => {
       const tituloInput = document.getElementById('reserveTitulo')
+      const bookIdInput = document.getElementById('reserveBookId')
       if (tituloInput) {
         tituloInput.value = ''
         tituloInput.focus()
+      }
+      if (bookIdInput) {
+        bookIdInput.value = ''
       }
     })
   }
@@ -934,11 +1058,11 @@ function setupEventListeners() {
     })
   }
 
-  console.log('[EVENTS] Event listeners registered')
+  // Los eventos quedan listos para la interacción del usuario.
 }
 
 function setupNavigation() {
-  console.log('[NAV] Configurando navegación')
+  // Se definen las rutas visibles dentro de la app.
   document.querySelectorAll('.nav-item').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault()
@@ -951,17 +1075,17 @@ function setupNavigation() {
       showView(view)
     })
   })
-  console.log('[NAV] Configuración de navegación completada')
+  // La navegación queda lista para cambiar entre vistas.
 }
 
-// Función de inicialización para configurar la app
+// Inicializa la app cargando listeners, sesión y datos base para que la biblioteca quede lista para usar.
 function initializeApp() {
-  console.log('[INIT] Inicializando app')
+  // La interfaz se prepara para usar la sesión y el catálogo.
   setupEventListeners()
   setupNavigation()
   loadAuthState()
   fetchAuthors()
-  console.log('[INIT] App inicializada')
+  // La app ya está lista para usarse.
 }
 
 // Esperar a que el DOM esté listo

@@ -14,7 +14,7 @@
       </header>
 
       <main>
-        <!-- PESTAÑA CUENTA: Login/Signup -->
+        <!-- Pantalla inicial donde el usuario entra con su correo y contraseña para acceder a la biblioteca. -->
         <section id="view-account" style="display:block">
           <div class="section-title">Mi Cuenta</div>
           
@@ -30,6 +30,7 @@
           <div id="welcome" style="display:none; margin-top:12px; padding:12px; background:#e8f5e9; border-radius:8px; color:#2e7d32;"></div>
         </section>
 
+        <!-- Vista principal del catálogo, donde se puede buscar y explorar los libros disponibles. -->
         <section class="search" id="view-home" style="display:none">
           <div class="section-title">¡Hola!</div>
           <div class="search">
@@ -39,8 +40,10 @@
 
           <div class="section-title">Catálogo</div>
           <section id="results" class="cards"></section>
+          <div id="resultsPagination" class="pagination"></div>
         </section>
 
+        <!-- Formulario para registrar nuevos libros cuando el bibliotecario desea dar de alta un título. -->
         <section id="view-admin" style="display:none">
           <div class="section-title">Alta Libro</div>
           <form id="bookForm">
@@ -56,9 +59,9 @@
           <div id="bookMsg" class="msg"></div>
         </section>
 
+        <!-- Vista de administración para localizar libros existentes y modificar su información o stock. -->
         <section id="view-edit" style="display:none">
           <div class="section-title">Edición</div>
-          <p>Editar libro y registrar bajas de stock con motivo técnico.</p>
           <div class="search">
             <input id="editSearchInput" placeholder="Buscar libro para editar" />
             <button id="editSearchBtn">Buscar</button>
@@ -71,6 +74,7 @@
           </div>
 
           <section id="editListTab" class="cards edit-subtab" style="margin-top:8px;"></section>
+          <div id="editPagination" class="pagination"></div>
 
           <section id="editDetailTab" class="edit-subtab" style="display:none; margin-top:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
@@ -101,9 +105,9 @@
           <div id="editMsg" class="msg"></div>
         </section>
 
+        <!-- Sección destinada a revisar el historial de reservas y bajas de stock realizadas en el sistema. -->
         <section id="view-history" style="display:none">
           <div class="section-title">Historial</div>
-          <p>Registro de actividades del sistema visible para el bibliotecario.</p>
           <div class="history-tabs" style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button type="button" class="history-tab-btn active" data-tab="reservas">Reservas</button>
             <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
@@ -114,18 +118,24 @@
             <div id="history-reservas" style="overflow-x:auto;"></div>
             <div id="history-bajas" style="display:none; overflow-x:auto;"></div>
           </div>
+          <div id="historyReservasPagination" class="pagination"></div>
+          <div id="historyBajasPagination" class="pagination"></div>
           <div id="historyMsg" class="msg"></div>
         </section>
 
+        <!-- Panel de control para ver perfiles de usuarios y cambiar su estado de acceso cuando corresponde. -->
         <section id="view-profiles" style="display:none">
           <div class="section-title">Gestión de Perfiles</div>
           <div id="profilesMsg" class="msg"></div>
           <div id="profilesContainer" style="overflow-x:auto; margin-top:12px;"></div>
+          <div id="profilesPagination" class="pagination"></div>
         </section>
 
+        <!-- Formulario de reserva que se activa cuando el usuario selecciona un libro desde el catálogo. -->
         <section id="view-reserve" style="display:none">
           <div class="section-title">Reservar</div>
           <form id="reserveForm">
+            <input type="hidden" id="reserveBookId" name="ID_Libro" />
             <div style="position: relative; margin-bottom: 10px;">
               <input id="reserveTitulo" name="Titulo" placeholder="Título del libro" required style="padding-right: 35px;" />
               <button type="button" id="clearTituloBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; font-size: 16px; color: #999;">✕</button>
@@ -137,6 +147,7 @@
         </section>
       </main>
 
+      <!-- Navegación inferior para moverse entre las distintas pantallas sin salir de la aplicación. -->
       <nav class="bottom-nav">
         <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
         <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>

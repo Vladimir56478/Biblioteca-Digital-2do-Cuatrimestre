@@ -22,6 +22,14 @@ from backend.db import get_engine
 
 app = FastAPI(title='Lorekeeper API')
 
+
+def current_timestamp() -> str:
+    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def format_datetime(value) -> str | None:
+    return value.strftime('%Y-%m-%d %H:%M:%S') if value else None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,7 +40,10 @@ app.add_middleware(
 
 engine = get_engine()
 
-# Datos base para inicializar usuarios y permisos en la base al arrancar.
+# La conexión ya quedó preparada en el módulo de base de datos y se reutiliza
+# para todas las operaciones de la biblioteca: usuarios, libros, reservas y reportes.
+
+# Aquí se definen los roles base y los usuarios iniciales que van a poder entrar al sistema.
 ADMIN_EMAIL = 'Bibliotecario.fanoba@tecnica29de6.edu.ar'
 PROTECTED_ROUTE_ROLES = {
     '/api/books': {'Bibliotecario'},
@@ -63,8 +74,8 @@ DEFAULT_USERS = [
 VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 
-# Inicialización de esquema: garantizan que existan columnas y tablas necesarias
-# cuando el servicio se levanta por primera vez.
+# Al iniciar la API, se aseguran columnas y tablas necesarias para que la app
+# pueda abrirse correctamente aunque la base ya tenga datos de versiones anteriores.
 def ensure_user_state_column():
     try:
         with engine.begin() as conn:
@@ -97,6 +108,8 @@ ensure_user_state_column()
 ensure_user_role_column()
 
 
+# Se cargan cuentas de ejemplo para probar la app desde el primer inicio.
+# Así se puede entrar con alumno, profesor y bibliotecario sin crear usuarios manualmente.
 def ensure_default_users():
     with engine.begin() as conn:
         for user in DEFAULT_USERS:
@@ -158,7 +171,8 @@ def ensure_log_sistema_table():
             ") ENGINE=InnoDB"
         ))
 
-        # Adaptar esquemas existentes: si la tabla antigua usaba ID_Log, renombrarla a ID.
+        # Si una instalación anterior guardaba la columna con otro nombre, se adapta
+        # para que el historial del sistema siga funcionando con el formato actual.
         has_id = conn.execute(text(
             "SELECT 1 FROM information_schema.COLUMNS "
             "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_sistema' AND COLUMN_NAME = 'ID'"
@@ -239,7 +253,8 @@ class SignupIn(BaseModel):
     Contraseña: str
 
 
-# Helpers de usuario y autorización
+# El rol del usuario se infiere con la misma lógica que usa la interfaz para mostrar
+# las vistas y bloquear accesos según si es alumno, profesor o bibliotecario.
 def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
     """Inferir tipo de usuario (Alumno/Profesor/Bibliotecario) según el Gmail o el rol almacenado."""
     if stored_type:
@@ -254,7 +269,8 @@ def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
     return 'Alumno' if '@alu.' in gmail.lower() else 'Profesor'
 
 
-# Funciones de ayuda para extraer identidad de la petición
+# Estas funciones leen los datos de la petición para saber quién está usando la app
+# y si el usuario tiene permisos para ejecutar la acción solicitada.
 def get_request_identity(request: Request) -> tuple[int | None, str | None]:
     user_id = request.headers.get('x-user-id') or request.headers.get('X-User-Id')
     user_type = request.headers.get('x-user-type') or request.headers.get('X-User-Type')
@@ -317,7 +333,8 @@ def get_authenticated_user(
     return user
 
 
-# Registro de bajas técnicas de ejemplares
+# Cada baja de stock queda registrada para mantener un historial claro de los ejemplares
+# que se dañaron, perdieron o retiraron del catálogo.
 def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int, motivo: str):
     motivo = motivo.strip()
     if motivo not in VALID_BAJA_MOTIVOS:
@@ -335,7 +352,7 @@ def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int
             'id_usuario': bibliotecario_id,
             'cantidad': cantidad,
             'motivo': motivo,
-            'fecha': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            'fecha': current_timestamp(),
         }
     )
 
@@ -353,12 +370,13 @@ def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripci
             'id_usuario': usuario_id,
             'id_libro': libro_id,
             'descripcion': descripcion,
-            'fecha': datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            'fecha': current_timestamp(),
         }
     )
 
 
-# Decorador para exigir roles y permisos en rutas
+# Este decorador protege las rutas que modifican el catálogo o gestionan reservas,
+# asegurando que solo el rol correcto pueda usarlas.
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
     def decorator(func):
         if inspect.iscoroutinefunction(func):
@@ -385,6 +403,36 @@ def require_role(*allowed_roles: str, require_admin_email: bool = False):
     return decorator
 
 
+def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 4
+    page = max(page, 1)
+    limit = max(limit, 1)
+    return page, limit
+
+
+def get_user_reservation_limit(user_type: str) -> int:
+    if user_type == 'Profesor':
+        return 25
+    if user_type == 'Bibliotecario':
+        return 30
+    return 3
+
+
+def get_user_reserved_count(conn, user_id: int) -> int:
+    result = conn.execute(
+        text('SELECT COALESCE(SUM(Cantidad), 0) FROM Reserva_Ejemplares WHERE ID_Usuario = :id'),
+        {'id': user_id}
+    ).scalar()
+    return int(result or 0)
+
+
 @app.middleware('http')
 async def enforce_role_middleware(request: Request, call_next):
     if request.url.path in PROTECTED_ROUTE_ROLES:
@@ -399,6 +447,8 @@ async def enforce_role_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+# Estos endpoints devuelven datos básicos que usa la interfaz para completar formularios
+# y mostrar listas de autores o libros sin sumar lógica extra al frontend.
 @app.get('/api/authors')
 def list_authors():
     with engine.connect() as conn:
@@ -406,11 +456,13 @@ def list_authors():
         return [{'ID_Autor': row[0], 'Nombre': row[1]} for row in res.fetchall()]
 
 
+# Estas rutas controlan el catálogo de libros: alta, edición, eliminación y ajustes de stock.
+# Están protegidas porque afectan directamente el inventario visible de la biblioteca.
 @app.post('/api/books')
 @require_role('Bibliotecario', require_admin_email=True)
 def add_book(request: Request, book: BookIn):
     with engine.begin() as conn:
-        # Insertar de forma segura usando parámetros
+        # Se guarda el libro con parámetros SQL para evitar problemas con caracteres especiales.
         stmt = text(
             "INSERT INTO Libro (Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock)"
             " VALUES (:titulo, :editorial, :id_autor, :anio, :isbn, :sinopsis, :stock)"
@@ -510,6 +562,21 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
         return {'ok': True, 'updated': book_id}
 
 
+@app.delete('/api/books/{book_id}')
+@require_role('Bibliotecario', require_admin_email=True)
+def delete_book(request: Request, book_id: int):
+    with engine.begin() as conn:
+        existing = conn.execute(text('SELECT 1 FROM Libro WHERE ID_Libro = :id'), {'id': book_id}).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+
+        conn.execute(text('DELETE FROM Reserva_Ejemplares WHERE ID_Libro = :id'), {'id': book_id})
+        conn.execute(text('DELETE FROM Baja_Ejemplares WHERE ID_Libro = :id'), {'id': book_id})
+        conn.execute(text('DELETE FROM Log_Sistema WHERE ID_Libro = :id'), {'id': book_id})
+        conn.execute(text('DELETE FROM Libro WHERE ID_Libro = :id'), {'id': book_id})
+    return {'ok': True, 'deleted': book_id}
+
+
 @app.post('/api/stock-reduction')
 @require_role('Bibliotecario', require_admin_email=True)
 def stock_reduction(request: Request, data: StockReductionIn):
@@ -534,8 +601,9 @@ def stock_reduction(request: Request, data: StockReductionIn):
 
 @app.get('/api/users')
 @require_role('Bibliotecario')
-def list_users(request: Request, role: str = 'all'):
+def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 10):
     role = role.strip()
+    page, limit = normalize_pagination(page, limit)
     if role == 'all':
         allowed_roles = ['Alumno', 'Profesor']
     elif role in ('Alumno', 'Profesor'):
@@ -544,18 +612,28 @@ def list_users(request: Request, role: str = 'all'):
         raise HTTPException(status_code=400, detail='Role inválido')
 
     with engine.connect() as conn:
+        count_stmt = text(
+            "SELECT COUNT(*) FROM Usuario WHERE Tipo IN (:tipo0, :tipo1)"
+            if len(allowed_roles) == 2 else
+            "SELECT COUNT(*) FROM Usuario WHERE Tipo = :tipo"
+        )
+        count_params = {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1]} if len(allowed_roles) == 2 else {'tipo': allowed_roles[0]}
+        total = conn.execute(count_stmt, count_params).scalar() or 0
+        pages = max(1, (int(total) + limit - 1) // limit)
+        offset = (page - 1) * limit
+
         if len(allowed_roles) == 1:
             stmt = text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado "
-                "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo"
+                "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
-            rows = conn.execute(stmt, {'tipo': allowed_roles[0]}).fetchall()
+            rows = conn.execute(stmt, {'tipo': allowed_roles[0], 'limit': limit, 'offset': offset}).fetchall()
         else:
             stmt = text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado "
-                "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo"
+                "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
-            rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1]}).fetchall()
+            rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1], 'limit': limit, 'offset': offset}).fetchall()
 
     users = []
     for row in rows:
@@ -566,7 +644,7 @@ def list_users(request: Request, role: str = 'all'):
             'Tipo': row[3],
             'Estado': row[4] or 'no vetado',
         })
-    return users
+    return {'total': int(total), 'page': page, 'pages': pages, 'users': users}
 
 
 @app.put('/api/users/{user_id}/state')
@@ -597,15 +675,23 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 
 
 @app.get('/api/search')
-def search(title: str = ''):
-    q = f"%{title.strip()}%"
+def search(title: str = '', page: int = 1, limit: int = 4):
+    title = title.strip()
+    page, limit = normalize_pagination(page, limit)
+    q = f"%{title}%"
     with engine.connect() as conn:
+        total = conn.execute(
+            text("SELECT COUNT(*) FROM Libro WHERE Titulo LIKE :q"),
+            {'q': q}
+        ).scalar() or 0
+        pages = max(1, (int(total) + limit - 1) // limit)
+        offset = (page - 1) * limit
         stmt = text(
             "SELECT l.ID_Libro, l.Titulo, l.Editorial, l.ISBN, l.Sinopsis, l.Stock, a.Nombre "
             "FROM Libro l LEFT JOIN Autor a ON l.ID_Autor = a.ID_Autor "
-            "WHERE l.Titulo LIKE :q ORDER BY l.Titulo"
+            "WHERE l.Titulo LIKE :q ORDER BY l.Titulo LIMIT :limit OFFSET :offset"
         )
-        res = conn.execute(stmt, {'q': q})
+        res = conn.execute(stmt, {'q': q, 'limit': limit, 'offset': offset})
         rows = []
         for r in res.fetchall():
             rows.append({
@@ -617,9 +703,11 @@ def search(title: str = ''):
                 'Stock': r[5],
                 'Autor': r[6],
             })
-        return rows
+        return {'total': int(total), 'page': page, 'pages': pages, 'books': rows}
 
 
+# El flujo de reservas valida que el usuario tenga permisos, no esté vetado y no supere
+# el límite de ejemplares que corresponde a su tipo de cuenta.
 @app.post('/api/reserve')
 @require_role('Alumno', 'Profesor', 'Bibliotecario')
 def reserve(request: Request, data: ReserveIn):
@@ -627,24 +715,36 @@ def reserve(request: Request, data: ReserveIn):
     if user['ID_Usuario'] != data.ID_Usuario:
         raise HTTPException(status_code=403, detail='La reserva debe pertenecer al usuario autenticado')
 
+    if data.Cantidad <= 0:
+        raise HTTPException(status_code=400, detail='Cantidad inválida')
+
     now = datetime.datetime.utcnow()
     exp = now + datetime.timedelta(days=2)
     with engine.begin() as conn:
-        # Verificar el estado del usuario
+        # Se revisa si el usuario está habilitado para reservar.
         u = conn.execute(text("SELECT Estado FROM Usuario WHERE ID_Usuario = :id"), {'id': data.ID_Usuario}).fetchone()
         if not u:
             raise HTTPException(status_code=404, detail='Usuario no encontrado')
         if u[0] == 'vetado':
             raise HTTPException(status_code=403, detail='Usuario vetado')
 
-        # Verificar stock disponible
+        # Se valida cuántos ejemplares puede reservar según el rol del usuario.
+        reserved_count = get_user_reserved_count(conn, data.ID_Usuario)
+        limit = get_user_reservation_limit(user['Tipo'])
+        if reserved_count + data.Cantidad > limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Has alcanzado el límite de reserva. {user["Tipo"]} puede reservar hasta {limit} ejemplar(es) en total. Actualmente tienes {reserved_count} reservados.'
+            )
+
+        # Se comprueba que haya stock suficiente antes de crear la reserva.
         book = conn.execute(text("SELECT Stock FROM Libro WHERE ID_Libro = :id"), {'id': data.ID_Libro}).fetchone()
         if not book:
             raise HTTPException(status_code=404, detail='Libro no encontrado')
         if book[0] < data.Cantidad:
             raise HTTPException(status_code=400, detail='Stock insuficiente')
 
-        # Generar código de reserva único
+        # Se genera un código de reserva único para identificar la operación en el historial.
         code = generate_res_code(conn)
 
         insert_stmt = text(
@@ -661,7 +761,7 @@ def reserve(request: Request, data: ReserveIn):
         }
         conn.execute(insert_stmt, params)
 
-        # Reducir stock del libro reservado
+        # Al confirmar la reserva, se descuenta el stock del libro para reflejar la disponibilidad real.
         conn.execute(text("UPDATE Libro SET Stock = Stock - :c WHERE ID_Libro = :id"), {'c': data.Cantidad, 'id': data.ID_Libro})
         insert_log(conn, 'Reserva Creada', data.ID_Usuario, data.ID_Libro, f'Reserva {code} de {data.Cantidad} ejemplar(es)')
         insert_log(conn, 'Stock Reducido', data.ID_Usuario, data.ID_Libro, f'Stock reducido por reserva {code}')
@@ -702,19 +802,21 @@ def get_logs(request: Request, limit: int = 50):
 
 @app.get('/api/history/reservas')
 @require_role('Bibliotecario')
-def get_history_reservas(request: Request, limit: int = 50):
-    if limit <= 0:
-        limit = 50
+def get_history_reservas(request: Request, page: int = 1, limit: int = 20):
+    page, limit = normalize_pagination(page, limit)
     with engine.connect() as conn:
+        total = conn.execute(text('SELECT COUNT(*) FROM Reserva_Ejemplares')).scalar() or 0
+        pages = max(1, (int(total) + limit - 1) // limit)
+        offset = (page - 1) * limit
         res = conn.execute(
             text(
                 "SELECT r.ID_Reserva, r.Codigo_reserva, r.ID_Libro, lib.Titulo, r.ID_Usuario, u.Nombre_Completo, r.Cantidad, r.Fecha_Reserva, r.Fecha_Expiracion_Reserva "
                 "FROM Reserva_Ejemplares r "
                 "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
                 "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
-                "ORDER BY r.ID_Reserva DESC LIMIT :limit"
+                "ORDER BY r.ID_Reserva DESC LIMIT :limit OFFSET :offset"
             ),
-            {'limit': limit}
+            {'limit': limit, 'offset': offset}
         )
         records = []
         for row in res.fetchall():
@@ -726,27 +828,29 @@ def get_history_reservas(request: Request, limit: int = 50):
                 'ID_Usuario': row[4],
                 'Usuario': row[5],
                 'Cantidad': row[6],
-                'Fecha_Reserva': row[7].strftime('%Y-%m-%d %H:%M:%S') if row[7] else None,
-                'Fecha_Expiracion_Reserva': row[8].strftime('%Y-%m-%d %H:%M:%S') if row[8] else None,
+                'Fecha_Reserva': format_datetime(row[7]),
+                'Fecha_Expiracion_Reserva': format_datetime(row[8]),
             })
-        return records
+        return {'total': int(total), 'page': page, 'pages': pages, 'reservas': records}
 
 
 @app.get('/api/history/bajas')
 @require_role('Bibliotecario')
-def get_history_bajas(request: Request, limit: int = 50):
-    if limit <= 0:
-        limit = 50
+def get_history_bajas(request: Request, page: int = 1, limit: int = 20):
+    page, limit = normalize_pagination(page, limit)
     with engine.connect() as conn:
+        total = conn.execute(text('SELECT COUNT(*) FROM Baja_Ejemplares')).scalar() or 0
+        pages = max(1, (int(total) + limit - 1) // limit)
+        offset = (page - 1) * limit
         res = conn.execute(
             text(
                 "SELECT b.ID_Baja, b.ID_Libro, lib.Titulo, b.ID_Usuario_Bibliotecario, u.Nombre_Completo, b.Cantidad, b.Motivo, b.Fecha "
                 "FROM Baja_Ejemplares b "
                 "LEFT JOIN Usuario u ON b.ID_Usuario_Bibliotecario = u.ID_Usuario "
                 "LEFT JOIN Libro lib ON b.ID_Libro = lib.ID_Libro "
-                "ORDER BY b.ID_Baja DESC LIMIT :limit"
+                "ORDER BY b.ID_Baja DESC LIMIT :limit OFFSET :offset"
             ),
-            {'limit': limit}
+            {'limit': limit, 'offset': offset}
         )
         records = []
         for row in res.fetchall():
@@ -760,7 +864,27 @@ def get_history_bajas(request: Request, limit: int = 50):
                 'Motivo': row[6],
                 'Fecha': row[7].strftime('%Y-%m-%d %H:%M:%S') if row[7] else None,
             })
-        return records
+        return {'total': int(total), 'page': page, 'pages': pages, 'bajas': records}
+
+
+@app.delete('/api/history/reservas')
+@require_role('Bibliotecario')
+def delete_history_reservas(request: Request):
+    with engine.begin() as conn:
+        # Antes de borrar el historial de reservas, se devuelve el stock reservado al catálogo.
+        reservas = conn.execute(text('SELECT ID_Libro, SUM(Cantidad) FROM Reserva_Ejemplares GROUP BY ID_Libro')).fetchall()
+        for libro_id, cantidad in reservas:
+            conn.execute(text('UPDATE Libro SET Stock = Stock + :cantidad WHERE ID_Libro = :id'), {'cantidad': cantidad, 'id': libro_id})
+        conn.execute(text('DELETE FROM Reserva_Ejemplares'))
+    return {'ok': True, 'deleted': 'reservas'}
+
+
+@app.delete('/api/history/bajas')
+@require_role('Bibliotecario')
+def delete_history_bajas(request: Request):
+    with engine.begin() as conn:
+        conn.execute(text('DELETE FROM Baja_Ejemplares'))
+    return {'ok': True, 'deleted': 'bajas'}
 
 
 @app.post('/api/login')
@@ -800,12 +924,12 @@ def signup(data: SignupIn):
         return {'ok': True, 'ID_Usuario': new_id, 'Nombre_Completo': data.Nombre_Completo, 'Gmail': data.Gmail, 'Tipo': tipo}
 
 
-# Serve static files (robust path resolution)
+# Se sirven los archivos estáticos que componen la interfaz web de la biblioteca.
 static_dir = Path(__file__).resolve().parent.parent / 'static'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=str(static_dir)), name='static_files')
-    # Serve index at root
+    # La raíz de la app carga la página principal de la interfaz.
     app.mount('/', StaticFiles(directory=str(static_dir), html=True), name='static')
 else:
-    # If static folder missing, root will still respond with API only
+    # Si la carpeta está ausente, la API sigue respondiendo pero la interfaz web no se verá.
     pass
