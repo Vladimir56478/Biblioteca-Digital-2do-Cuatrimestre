@@ -73,9 +73,12 @@
           <section id="editListTab" class="cards edit-subtab" style="margin-top:8px;"></section>
 
           <section id="editDetailTab" class="edit-subtab" style="display:none; margin-top:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
               <div style="font-weight:700">Editar libro</div>
-              <button type="button" id="backToEditList">Volver a la lista</button>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" id="deleteBookBtn" style="background:#c62828; color:white; border:none; padding:8px 12px; border-radius:6px; cursor:pointer;">Eliminar libro</button>
+                <button type="button" id="backToEditList">Volver a la lista</button>
+              </div>
             </div>
             <form id="editForm" style="display:block">
               <input type="hidden" name="ID_Libro" id="editBookId" />
@@ -101,9 +104,11 @@
         <section id="view-history" style="display:none">
           <div class="section-title">Historial</div>
           <p>Registro de actividades del sistema visible para el bibliotecario.</p>
-          <div class="history-tabs" style="margin-top:12px; display:flex; gap:8px;">
+          <div class="history-tabs" style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button type="button" class="history-tab-btn active" data-tab="reservas">Reservas</button>
             <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
+            <button type="button" id="clearReservasBtn" style="margin-left:auto; background:#c62828; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px;">Eliminar historial reservas</button>
+            <button type="button" id="clearBajasBtn" style="background:#c62828; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px;">Eliminar historial bajas</button>
           </div>
           <div id="historyContainers" style="margin-top:12px;">
             <div id="history-reservas" style="overflow-x:auto;"></div>
@@ -114,14 +119,18 @@
 
         <section id="view-profiles" style="display:none">
           <div class="section-title">Gestión de Perfiles</div>
-          <p>Gestión de usuarios y permisos disponible para el bibliotecario.</p>
+          <div id="profilesMsg" class="msg"></div>
+          <div id="profilesContainer" style="overflow-x:auto; margin-top:12px;"></div>
         </section>
 
         <section id="view-reserve" style="display:none">
           <div class="section-title">Reservar</div>
           <form id="reserveForm">
-            <input name="ID_Libro" placeholder="ID del libro" type="number" required />
-            <input name="Cantidad" placeholder="Cantidad" type="number" value="1" min="1" />
+            <div style="position: relative; margin-bottom: 10px;">
+              <input id="reserveTitulo" name="Titulo" placeholder="Título del libro" required style="padding-right: 35px;" />
+              <button type="button" id="clearTituloBtn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; font-size: 16px; color: #999;">✕</button>
+            </div>
+            <input id="reserveCantidad" name="Cantidad" placeholder="Cantidad" type="number" value="1" min="1" />
             <button type="submit">Reservar libro</button>
           </form>
           <div id="reserveMsg" class="msg"></div>
@@ -139,6 +148,6 @@
       </nav>
     </div>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>
