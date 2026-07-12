@@ -65,6 +65,16 @@ VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 # Inicialización de esquema: garantizan que existan columnas y tablas necesarias
 # cuando el servicio se levanta por primera vez.
+def ensure_user_state_column():
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('SELECT Estado FROM Usuario LIMIT 1'))
+    except Exception:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE Usuario ADD COLUMN Estado VARCHAR(30) DEFAULT 'no vetado'"))
+            conn.execute(text("UPDATE Usuario SET Estado = 'no vetado' WHERE Estado IS NULL"))
+
+
 def ensure_user_role_column():
     try:
         with engine.begin() as conn:
@@ -83,6 +93,7 @@ def ensure_user_role_column():
             )
 
 
+ensure_user_state_column()
 ensure_user_role_column()
 
 
@@ -199,6 +210,10 @@ class StockReductionIn(BaseModel):
     Motivo: str
 
 
+class UserStateUpdate(BaseModel):
+    Estado: str = Field(..., max_length=30)
+
+
 def generate_res_code(conn) -> str:
     # Genera códigos de reserva en formato RES-XXXX donde X es letra mayúscula o dígito
     attempts = 0
@@ -267,7 +282,7 @@ def get_authenticated_user(
         return cached_user
 
     user_id, user_type = get_request_identity(request)
-    if not user_id or not user_type:
+    if not user_id:
         raise HTTPException(status_code=401, detail='No autenticado')
 
     with engine.connect() as conn:
@@ -280,6 +295,8 @@ def get_authenticated_user(
         raise HTTPException(status_code=401, detail='Usuario no encontrado')
 
     actual_type = infer_user_type(row[2], row[4])
+    if not user_type:
+        user_type = actual_type
     if user_type.lower() != actual_type.lower():
         raise HTTPException(status_code=403, detail='Rol no autorizado')
 
@@ -513,6 +530,70 @@ def stock_reduction(request: Request, data: StockReductionIn):
         insert_baja_record(conn, data.ID_Libro, user['ID_Usuario'], data.Cantidad, motivo)
         insert_log(conn, 'Stock Reducido', user['ID_Usuario'], data.ID_Libro, f'Stock reducido por baja técnica: {motivo}')
         return {'ok': True, 'ID_Libro': data.ID_Libro, 'Cantidad': data.Cantidad}
+
+
+@app.get('/api/users')
+@require_role('Bibliotecario')
+def list_users(request: Request, role: str = 'all'):
+    role = role.strip()
+    if role == 'all':
+        allowed_roles = ['Alumno', 'Profesor']
+    elif role in ('Alumno', 'Profesor'):
+        allowed_roles = [role]
+    else:
+        raise HTTPException(status_code=400, detail='Role inválido')
+
+    with engine.connect() as conn:
+        if len(allowed_roles) == 1:
+            stmt = text(
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado "
+                "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo"
+            )
+            rows = conn.execute(stmt, {'tipo': allowed_roles[0]}).fetchall()
+        else:
+            stmt = text(
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado "
+                "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo"
+            )
+            rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1]}).fetchall()
+
+    users = []
+    for row in rows:
+        users.append({
+            'ID_Usuario': row[0],
+            'Nombre_Completo': row[1],
+            'Gmail': row[2],
+            'Tipo': row[3],
+            'Estado': row[4] or 'no vetado',
+        })
+    return users
+
+
+@app.put('/api/users/{user_id}/state')
+@require_role('Bibliotecario')
+def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
+    new_state = data.Estado.strip().lower()
+    if new_state not in ['vetado', 'no vetado']:
+        raise HTTPException(status_code=400, detail='Estado debe ser "vetado" o "no vetado"')
+
+    with engine.begin() as conn:
+        target = conn.execute(
+            text('SELECT Tipo FROM Usuario WHERE ID_Usuario = :id'),
+            {'id': user_id}
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail='Usuario no encontrado')
+        if target[0] == 'Bibliotecario':
+            raise HTTPException(status_code=403, detail='No se puede vetar al bibliotecario')
+
+        result = conn.execute(
+            text("UPDATE Usuario SET Estado = :estado WHERE ID_Usuario = :id"),
+            {'estado': new_state, 'id': user_id}
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail='Usuario no encontrado')
+
+    return {'ok': True, 'ID_Usuario': user_id, 'Estado': new_state}
 
 
 @app.get('/api/search')

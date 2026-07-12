@@ -124,23 +124,11 @@ function showView(viewName) {
     if (viewName === 'history') {
       loadHistoryLogs()
     }
+    if (viewName === 'profiles') {
+      loadProfiles()
+    }
   } catch (e) {
     console.error('Error in showView:', e)
-  }
-}
-
-function switchAuthTab(tab) {
-  document.querySelectorAll('.auth-tab').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab)
-  })
-  const loginForm = document.getElementById('loginForm')
-  const signupForm = document.getElementById('signupForm')
-  if (tab === 'signup') {
-    if (loginForm) loginForm.style.display = 'none'
-    if (signupForm) signupForm.style.display = 'block'
-  } else {
-    if (loginForm) loginForm.style.display = 'block'
-    if (signupForm) signupForm.style.display = 'none'
   }
 }
 
@@ -425,6 +413,169 @@ function preFillAndShowReserveForm(titulo) {
     tituloInput.value = titulo
   }
   showView('reserve')
+}
+
+// Cargar tabla de perfiles de usuarios
+async function loadProfiles() {
+  const container = document.getElementById('profilesContainer')
+  const msg = document.getElementById('profilesMsg')
+  if (!container) return
+  if (msg) msg.textContent = ''
+
+  try {
+    const res = await fetch('/api/users?role=all', {
+      headers: getAuthHeaders()
+    })
+    const users = await res.json()
+    if (!res.ok) {
+      if (msg) {
+        msg.textContent = 'Error cargando perfiles: ' + (users.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return
+    }
+
+    container.innerHTML = ''
+    if (!users || !Array.isArray(users) || users.length === 0) {
+      container.innerHTML = '<p>No hay usuarios registrados</p>'
+      return
+    }
+
+    const table = document.createElement('table')
+    table.className = 'history-table'
+    table.style.width = '100%'
+
+    const thead = document.createElement('thead')
+    const headerRow = document.createElement('tr')
+    const headers = ['Nombre', 'Gmail', 'Tipo', 'Estado', 'Acciones']
+    headers.forEach(h => {
+      const th = document.createElement('th')
+      th.textContent = h
+      headerRow.appendChild(th)
+    })
+    thead.appendChild(headerRow)
+    table.appendChild(thead)
+
+    const tbody = document.createElement('tbody')
+    users.forEach(user => {
+      const row = document.createElement('tr')
+      
+      const nameCell = document.createElement('td')
+      nameCell.textContent = user.Nombre_Completo || '-'
+      row.appendChild(nameCell)
+
+      const gmailCell = document.createElement('td')
+      gmailCell.textContent = user.Gmail || '-'
+      row.appendChild(gmailCell)
+
+      const typeCell = document.createElement('td')
+      typeCell.textContent = user.Tipo || '-'
+      row.appendChild(typeCell)
+
+      const stateCell = document.createElement('td')
+      stateCell.textContent = user.Estado || 'no vetado'
+      row.appendChild(stateCell)
+
+      const actionCell = document.createElement('td')
+      if (user.Estado === 'vetado') {
+        const unbanBtn = document.createElement('button')
+        unbanBtn.type = 'button'
+        unbanBtn.textContent = 'Desvetar'
+        unbanBtn.style.background = '#4caf50'
+        unbanBtn.style.color = 'white'
+        unbanBtn.style.border = 'none'
+        unbanBtn.style.padding = '6px 12px'
+        unbanBtn.style.borderRadius = '4px'
+        unbanBtn.style.cursor = 'pointer'
+        unbanBtn.addEventListener('click', () => unbanUser(user.ID_Usuario))
+        actionCell.appendChild(unbanBtn)
+      } else {
+        const banBtn = document.createElement('button')
+        banBtn.type = 'button'
+        banBtn.textContent = 'Vetar'
+        banBtn.style.background = '#f44336'
+        banBtn.style.color = 'white'
+        banBtn.style.border = 'none'
+        banBtn.style.padding = '6px 12px'
+        banBtn.style.borderRadius = '4px'
+        banBtn.style.cursor = 'pointer'
+        banBtn.addEventListener('click', () => banUser(user.ID_Usuario))
+        actionCell.appendChild(banBtn)
+      }
+      row.appendChild(actionCell)
+      tbody.appendChild(row)
+    })
+    table.appendChild(tbody)
+    container.appendChild(table)
+  } catch (e) {
+    console.error('Error cargando perfiles:', e)
+    if (msg) {
+      msg.textContent = 'Error cargando perfiles: ' + e.message
+      msg.style.color = 'red'
+    }
+  }
+}
+
+// Vetar usuario
+async function banUser(userId) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId + '/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ Estado: 'vetado' })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      if (msg) {
+        msg.textContent = 'Usuario vetado correctamente'
+        msg.style.color = 'green'
+      }
+      loadProfiles()
+    } else {
+      if (msg) {
+        msg.textContent = 'Error vetando usuario: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+    }
+  } catch (e) {
+    console.error('Error vetando usuario:', e)
+    if (msg) {
+      msg.textContent = 'Error vetando usuario'
+      msg.style.color = 'red'
+    }
+  }
+}
+
+// Desvetar usuario
+async function unbanUser(userId) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId + '/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ Estado: 'no vetado' })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      if (msg) {
+        msg.textContent = 'Usuario desvetado correctamente'
+        msg.style.color = 'green'
+      }
+      loadProfiles()
+    } else {
+      if (msg) {
+        msg.textContent = 'Error desvetando usuario: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+    }
+  } catch (e) {
+    console.error('Error desvetando usuario:', e)
+    if (msg) {
+      msg.textContent = 'Error desvetando usuario'
+      msg.style.color = 'red'
+    }
+  }
 }
 
 // Configurar todos los event listeners de la página
