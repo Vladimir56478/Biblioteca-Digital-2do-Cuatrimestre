@@ -54,8 +54,10 @@ button[type=submit]{background:var(--accent);color:white;padding:12px;border-rad
 
 /* Estilos para las pestañas del historial y las tablas que muestran reservas y bajas. */
 .history-tabs{display:flex;gap:8px;margin-top:10px}
-.history-tab-btn{flex:1;padding:10px 12px;border:1px solid #dcd7d7;border-radius:10px;background:#fafafa;color:#333;cursor:pointer;transition:all 0.2s}
+.history-tab-btn{flex:1;padding:10px 12px;border:1px solid #0b5a52;border-radius:10px;background:white;color:#333;cursor:pointer;transition:all 0.2s;font-weight:600}
 .history-tab-btn.active{background:var(--accent);color:white;border-color:var(--accent)}
+.history-tab-btn:hover{opacity:0.85}
+.history-actions{display:flex;gap:8px;width:100%}
 .history-table{width:100%;border-collapse:collapse;margin-top:12px}
 .history-table th,.history-table td{border:1px solid #e6e2e2;padding:10px 12px;text-align:left;font-size:13px}
 .history-table th{background:#f3f3f3;color:#333}

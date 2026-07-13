@@ -1,6 +1,6 @@
 # Lorekeeper - Biblioteca
 
-Proyecto simple para gestionar libros, usuarios y reservas con un backend en FastAPI y una interfaz web estática.
+Un Proyecto para gestionar libros, usuarios y reservas con un backend en FastAPI y una interfaz web estática.
 
 ## Qué incluye
 
@@ -59,7 +59,7 @@ http://localhost:8000/
 
 ## Usuarios de prueba
 
-El sistema trae usuarios de ejemplo para probar la demo:
+El sistema trae usuarios de ejemplo para probar el software:
 
 - Alumno: vladimir.gaspar.672@alu.tecnica29de6.edu.ar / hash_pass_123
 - Profesor: alan.etkin@tecnica29de6.edu.ar / hash_pass_profe
@@ -68,5 +68,5 @@ El sistema trae usuarios de ejemplo para probar la demo:
 ## Notas
 
 - El backend carga la configuración desde backend/.env.
-- Si cambias la base de datos, solo hace falta actualizar ese archivo.
+- Si cambias la base de datos, solo hace falta actualizar ese archivo, mediante un dump export e import humilde entre maquinas(mysqlworkbench).
 - No se eliminaron archivos útiles porque todos ayudan a que la app funcione en una máquina nueva.

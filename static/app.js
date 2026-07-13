@@ -16,6 +16,7 @@ let currentEditBookStock = null
 let historyCurrentTab = 'reservas'
 
 // Recupera la sesión guardada en el navegador para volver a entrar a la app sin pedir login otra vez.
+// Si ya había un usuario autenticado, muestra la vista principal directamente.
 function loadAuthState() {
   const stored = localStorage.getItem('authState')
   if (stored) {
@@ -38,8 +39,13 @@ function getAuthHeaders(extra = {}) {
   if (authState.ID_Usuario) headers['X-User-Id'] = String(authState.ID_Usuario)
   if (authState.Tipo) headers['X-User-Type'] = authState.Tipo
   return headers
+
+// Añade la información del usuario a cada petición protegida.
+// El backend usa estos valores para verificar permisos.
 }
 
+// Las cabeceras del usuario se envían en cada petición protegida
+// para que el backend pueda saber quién hace la acción.
 // Cerrar sesión
 function logout() {
   authState = { isAuthenticated: false, ID_Usuario: null, Nombre_Completo: null, Tipo: null }
@@ -123,6 +129,7 @@ function showView(viewName) {
   }
 }
 
+// Esta petición se hace una vez al iniciar la app para mantener los selects actualizados.
 // Carga los autores disponibles para completar los formularios de alta y edición de libros.
 async function fetchAuthors() {
   try {
@@ -146,6 +153,7 @@ async function fetchAuthors() {
 
 const editState = { page: 1, limit: 4, pages: 1, query: '' }
 
+// El resultado incluye botones para cargar cada libro en el formulario de edición.
 // Solicita los libros que pueden editarse y arma la lista paginada para la vista de administración.
 async function loadEditBooks(query = '', page = 1) {
   const results = document.getElementById('editListTab')
@@ -418,6 +426,7 @@ function renderPagination(container, page, pages, onPageClick) {
   container.appendChild(next)
 }
 
+// Esta función actualiza la vista de resultados y la paginación.
 // Consulta la API del catálogo y arma las tarjetas del buscador con stock y botón de reserva.
 async function doSearch(page = 1) {
   const searchInput = document.getElementById('searchInput')
@@ -669,7 +678,8 @@ async function unbanUser(userId) {
 
 // Conecta formularios, botones y enlaces con las funciones de la interfaz para que respondan a la interacción del usuario.
 function setupEventListeners() {
-  // Se preparan los controles de la interfaz al cargar la página.
+  // Vincula los controles HTML a las funciones de negocio del frontend.
+  // Esto deja el DOM listo para responder a interacciones del usuario.
 
   // Inicio de sesión
   const loginForm = document.getElementById('loginForm')
@@ -798,7 +808,7 @@ function setupEventListeners() {
     reserveForm.addEventListener('submit', async (e) => {
       e.preventDefault()
       const formData = Object.fromEntries(new FormData(e.target).entries())
-      // Si no se proporcionó ID_Libro, intentar resolver por título (case-insensitive)
+      // Si no se proporcionó ID_Libro, intentar resolver por título (insensible a mayúsculas)
       let libroId = Number(formData.ID_Libro)
       const tituloIngresado = (formData.Titulo || '').trim()
       if ((!libroId || libroId === 0) && tituloIngresado) {

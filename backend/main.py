@@ -40,6 +40,9 @@ app.add_middleware(
 
 engine = get_engine()
 
+# El motor SQLAlchemy es el punto central del backend.
+# Las rutas reutilizan esta conexión para mantener la lógica de datos clara y compartida.
+# La aplicación no vuelve a crear el engine en cada petición.
 # La conexión ya quedó preparada en el módulo de base de datos y se reutiliza
 # para todas las operaciones de la biblioteca: usuarios, libros, reservas y reportes.
 
@@ -74,8 +77,9 @@ DEFAULT_USERS = [
 VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 
-# Al iniciar la API, se aseguran columnas y tablas necesarias para que la app
-# pueda abrirse correctamente aunque la base ya tenga datos de versiones anteriores.
+# Al iniciar la API se revisa y actualiza el esquema si hace falta.
+# Esto permite que el backend se ejecute en bases de datos existentes
+# sin fallar por columnas nuevas o tablas que no estaban definidas antes.
 def ensure_user_state_column():
     try:
         with engine.begin() as conn:
@@ -269,8 +273,8 @@ def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
     return 'Alumno' if '@alu.' in gmail.lower() else 'Profesor'
 
 
-# Estas funciones leen los datos de la petición para saber quién está usando la app
-# y si el usuario tiene permisos para ejecutar la acción solicitada.
+# Busca la identidad del usuario en las cabeceras HTTP o en cookies.
+# Devuelve el ID y el tipo de usuario para que las rutas protegidas puedan validar acceso.
 def get_request_identity(request: Request) -> tuple[int | None, str | None]:
     user_id = request.headers.get('x-user-id') or request.headers.get('X-User-Id')
     user_type = request.headers.get('x-user-type') or request.headers.get('X-User-Type')
@@ -301,6 +305,8 @@ def get_authenticated_user(
     if not user_id:
         raise HTTPException(status_code=401, detail='No autenticado')
 
+    # Si hay un usuario válido en la base, lo devolvemos junto a su estado
+    # para que el middleware o la ruta puedan seguir con la ejecución.
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo FROM Usuario WHERE ID_Usuario = :id"),
@@ -310,6 +316,7 @@ def get_authenticated_user(
     if not row:
         raise HTTPException(status_code=401, detail='Usuario no encontrado')
 
+    # Normaliza el tipo de usuario según el correo y los datos guardados.
     actual_type = infer_user_type(row[2], row[4])
     if not user_type:
         user_type = actual_type
@@ -319,6 +326,7 @@ def get_authenticated_user(
     if allowed_roles and actual_type not in allowed_roles:
         raise HTTPException(status_code=403, detail='No tiene permisos para esta acción')
 
+    # Comprueba si se requiere que el usuario sea el administrador principal.
     if require_admin_email and row[2].lower() != ADMIN_EMAIL.lower():
         raise HTTPException(status_code=403, detail='No tiene permisos para esta acción')
 
@@ -375,8 +383,9 @@ def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripci
     )
 
 
-# Este decorador protege las rutas que modifican el catálogo o gestionan reservas,
-# asegurando que solo el rol correcto pueda usarlas.
+# El decorador `require_role` aplica validación de usuario a nivel de ruta.
+# Busca el objeto Request, verifica credenciales y bloquea accesos no autorizados
+# antes de ejecutar la función del endpoint.
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
     def decorator(func):
         if inspect.iscoroutinefunction(func):
@@ -403,6 +412,8 @@ def require_role(*allowed_roles: str, require_admin_email: bool = False):
     return decorator
 
 
+# Normaliza los parámetros de paginación recibidos desde la interfaz.
+# Evita valores inválidos y establece valores mínimos seguros.
 def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
     try:
         page = int(page)
@@ -447,8 +458,9 @@ async def enforce_role_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Estos endpoints devuelven datos básicos que usa la interfaz para completar formularios
-# y mostrar listas de autores o libros sin sumar lógica extra al frontend.
+# Estas rutas exponen datos que la interfaz necesita de forma directa.
+# El frontend solicita autores, libros y estados de usuario para renderizar
+# los formularios y las tablas sin tener que reconstruir la lógica del backend.
 @app.get('/api/authors')
 def list_authors():
     with engine.connect() as conn:
@@ -928,7 +940,8 @@ def signup(data: SignupIn):
 static_dir = Path(__file__).resolve().parent.parent / 'static'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=str(static_dir)), name='static_files')
-    # La raíz de la app carga la página principal de la interfaz.
+    # Sirve los archivos estáticos del frontend y la página principal.
+    # Si la carpeta no existe, la API seguirá funcionando pero no habrá UI web disponible.
     app.mount('/', StaticFiles(directory=str(static_dir), html=True), name='static')
 else:
     # Si la carpeta está ausente, la API sigue respondiendo pero la interfaz web no se verá.

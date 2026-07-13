@@ -10,7 +10,8 @@
   <div class="device">
     <div class="app">
       <header class="logo">
-        <img src="/static/logo.svg" alt="Lorekeeper" />
+        <!-- Logo de Lorekeeper reemplazado por el PNG disponible en el proyecto -->
+        <img src="/static/logo.png" alt="Lorekeeper" />
       </header>
 
       <main>
@@ -108,11 +109,15 @@
         <!-- Sección destinada a revisar el historial de reservas y bajas de stock realizadas en el sistema. -->
         <section id="view-history" style="display:none">
           <div class="section-title">Historial</div>
-          <div class="history-tabs" style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button type="button" class="history-tab-btn active" data-tab="reservas">Reservas</button>
-            <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
-            <button type="button" id="clearReservasBtn" style="margin-left:auto; background:#c62828; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px;">Eliminar historial reservas</button>
-            <button type="button" id="clearBajasBtn" style="background:#c62828; color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px;">Eliminar historial bajas</button>
+          <div class="history-controls" style="margin-top:12px;">
+            <div class="history-tabs" style="display:flex; gap:8px; margin-bottom:8px;">
+              <button type="button" class="history-tab-btn active" data-tab="reservas">Reservas</button>
+              <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
+            </div>
+            <div class="history-actions" style="display:flex; gap:8px;">
+              <button type="button" id="clearReservasBtn" style="flex:1; background:#c62828; color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">Eliminar historial reservas</button>
+              <button type="button" id="clearBajasBtn" style="flex:1; background:#c62828; color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">Eliminar historial bajas</button>
+            </div>
           </div>
           <div id="historyContainers" style="margin-top:12px;">
             <div id="history-reservas" style="overflow-x:auto;"></div>

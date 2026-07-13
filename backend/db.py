@@ -5,10 +5,12 @@ from dotenv import load_dotenv
 
 # Carga la configuración de conexión desde backend/.env para que la app pueda
 # usar una base local o la de Clever Cloud sin tocar la lógica del proyecto.
+# Esto mantiene la configuración separada del código.
 load_dotenv(Path(__file__).resolve().parent / '.env')
 
 # Si la instancia externa ofrece una URL completa, se usa primero porque
 # simplifica la conexión del backend con menos variables manuales.
+# El backend acepta tanto URI completas como parámetros individuales.
 MYSQL_URI = os.getenv('MYSQL_ADDON_URI') or os.getenv('MYSQL_ADDON_URL') or os.getenv('DATABASE_URL')
 
 if MYSQL_URI:
