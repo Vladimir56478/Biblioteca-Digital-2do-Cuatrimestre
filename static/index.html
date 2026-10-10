@@ -4,15 +4,28 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Lorekeeper - Biblioteca</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=2">
 </head>
 <body>
   <div class="device">
     <div class="app">
       <header class="logo">
-        <!-- Logo de Lorekeeper reemplazado por el PNG disponible en el proyecto -->
         <img src="/static/logo.png" alt="Lorekeeper" />
+        <div class="brand-copy">
+          <h1>Lorekeeper</h1>
+          <p>Biblioteca digital</p>
+        </div>
       </header>
+
+      <nav class="bottom-nav" aria-label="Navegación principal">
+        <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
+        <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
+        <a href="#" class="nav-item" data-view="reserve" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
+        <a href="#" class="nav-item" data-view="admin" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
+        <a href="#" class="nav-item" data-view="edit" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="#333" stroke-width="1.6"/><path d="M7 11l5 5 5-5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Edición</span></a>
+        <a href="#" class="nav-item" data-view="history" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 10h16M4 15h16" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Historial</span></a>
+        <a href="#" class="nav-item" data-view="profiles" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Perfiles</span></a>
+      </nav>
 
       <main>
         <!-- Pantalla inicial donde el usuario entra con su correo y contraseña para acceder a la biblioteca. -->
@@ -32,7 +45,7 @@
         </section>
 
         <!-- Vista principal del catálogo, donde se puede buscar y explorar los libros disponibles. -->
-        <section class="search" id="view-home" style="display:none">
+        <section id="view-home" style="display:none">
           <div class="section-title">¡Hola!</div>
           <div class="search">
             <input id="searchInput" placeholder="Buscar título del libro" />
@@ -116,8 +129,7 @@
               <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
             </div>
             <div class="history-actions" style="display:flex; gap:8px;">
-              <button type="button" id="clearReservasBtn" style="flex:1; background:#c62828; color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">Eliminar historial reservas</button>
-              <button type="button" id="clearBajasBtn" style="flex:1; background:#c62828; color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">Eliminar historial bajas</button>
+              <span>Los historiales están protegidos contra eliminación.</span>
             </div>
           </div>
           <div id="historyContainers" style="margin-top:12px;">
@@ -137,6 +149,20 @@
           <div id="profilesMsg" class="msg"></div>
           <div id="profilesContainer" style="overflow-x:auto; margin-top:12px;"></div>
           <div id="profilesPagination" class="pagination"></div>
+          <dialog id="banDialog" class="ban-dialog">
+            <form id="banForm">
+              <h2>Gestionar veto temporal</h2>
+              <p id="banTargetName"></p>
+              <label for="banReason">Motivo</label>
+              <textarea id="banReason" maxlength="255" required></textarea>
+              <label for="banDuration">Duración (días)</label>
+              <input id="banDuration" type="number" min="1" max="365" value="7" required />
+              <div class="dialog-actions">
+                <button type="submit">Guardar veto</button>
+                <button type="button" id="cancelBanBtn" class="secondary-button">Cancelar</button>
+              </div>
+            </form>
+          </dialog>
         </section>
 
         <!-- Formulario de reserva que se activa cuando el usuario selecciona un libro desde el catálogo. -->
@@ -155,18 +181,8 @@
         </section>
       </main>
 
-      <!-- Navegación inferior para moverse entre las distintas pantallas sin salir de la aplicación. -->
-      <nav class="bottom-nav">
-        <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
-        <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
-        <a href="#" class="nav-item" data-view="reserve" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#333" stroke-width="1.6"/></svg><span>Reservas</span></a>
-        <a href="#" class="nav-item" data-view="admin" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
-        <a href="#" class="nav-item" data-view="edit" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="#333" stroke-width="1.6"/><path d="M7 11l5 5 5-5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Edición</span></a>
-        <a href="#" class="nav-item" data-view="history" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 10h16M4 15h16" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Historial</span></a>
-        <a href="#" class="nav-item" data-view="profiles" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Perfiles</span></a>
-      </nav>
     </div>
   </div>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -8,7 +8,10 @@ Un Proyecto para gestionar libros, usuarios y reservas con un backend en FastAPI
 - Base de datos MySQL configurable por variables de entorno
 - Frontend estático con HTML, CSS y JavaScript
 - Autenticación por roles para alumnos, profesores y bibliotecarios
-- Gestión de libros, reservas, historial y bajas de stock
+- Gestión de libros, reservas, historial protegido y bajas de stock
+- Gestión de curso, egresados de 6.º y vetos temporales con motivo
+- Visualización del stock total y de las unidades disponibles
+- Interfaz adaptable a celular y PC
 
 ## Estructura del proyecto
 
@@ -68,5 +71,8 @@ El sistema trae usuarios de ejemplo para probar el software:
 ## Notas
 
 - El backend carga la configuración desde backend/.env.
+- Al iniciar, el backend agrega de forma compatible las columnas de curso y veto que usan las funciones nuevas. Los alumnos existentes quedan con el curso sin asignar hasta que el bibliotecario lo complete en Gestión de Perfiles.
+- Los historiales no se pueden vaciar ni borrar al eliminar un libro; el backend conserva sus registros. La eliminación de alumnos solo está habilitada para alumnos identificados en 6.º y sin reservas pendientes.
+- El stock disponible corresponde a `Libro.Stock`, mientras que `Libro.Stock_Total` conserva el inventario total: reservar ejemplares reduce solo la disponibilidad; agregar o dar de baja ejemplares actualiza ambos valores. En bases existentes, al agregar la columna se conserva el total que ya mostraba la aplicación.
 - Si cambias la base de datos, solo hace falta actualizar ese archivo, mediante un dump export e import humilde entre maquinas(mysqlworkbench).
 - No se eliminaron archivos útiles porque todos ayudan a que la app funcione en una máquina nueva.

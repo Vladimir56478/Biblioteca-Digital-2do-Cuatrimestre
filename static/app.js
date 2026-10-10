@@ -14,6 +14,7 @@ let authState = {
 
 let currentEditBookStock = null
 let historyCurrentTab = 'reservas'
+let banTargetUserId = null
 
 // Recupera la sesión guardada en el navegador para volver a entrar a la app sin pedir login otra vez.
 // Si ya había un usuario autenticado, muestra la vista principal directamente.
@@ -25,7 +26,6 @@ function loadAuthState() {
   updateUIBasedOnAuth()
   if (authState.isAuthenticated) {
     showView('home')
-    doSearch()
   }
 }
 
@@ -115,6 +115,9 @@ function showView(viewName) {
     })
     const target = document.getElementById('view-' + viewName)
     if (target) target.style.display = 'block'
+    if (viewName === 'home') {
+      doSearch()
+    }
     if (viewName === 'edit') {
       loadEditBooks()
     }
@@ -183,7 +186,7 @@ async function loadEditBooks(query = '', page = 1) {
           <div style="font-weight:700; color:var(--accent); margin-bottom:4px">${it.Titulo}</div>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
-          <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
+          <p style="margin:0; color:#0b5a52; font-weight:700;">Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}</p>
           <button type="button" class="edit-book-btn" data-id="${it.ID_Libro}">Editar</button>
         </div>
       `
@@ -509,8 +512,8 @@ async function doSearch(page = 1) {
           <div style="font-weight:700; color:var(--accent); margin-bottom:4px;">${it.Titulo}</div>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
           <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
-          <p style="margin:0; color:#0b5a52; font-weight:700;">Stock: ${it.Stock}</p>
-          <button type="button" class="reserve-btn" data-id="${it.ID_Libro}" data-titulo="${it.Titulo}" style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
+          <p style="margin:0; color:#0b5a52; font-weight:700;">Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}</p>
+          <button type="button" class="reserve-btn" data-id="${it.ID_Libro}" data-titulo="${it.Titulo}" ${it.Stock_Disponible <= 0 ? 'disabled' : ''} style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
         </div>
       `
       container.appendChild(card)
@@ -551,6 +554,23 @@ function preFillAndShowReserveForm(titulo, bookId) {
 // Mantiene el estado de paginación de la tabla de usuarios para navegar entre páginas de perfiles.
 const profilesState = { page: 1, limit: 10, pages: 1 }
 
+function openBanDialog(user) {
+  const dialog = document.getElementById('banDialog')
+  const targetName = document.getElementById('banTargetName')
+  const reason = document.getElementById('banReason')
+  const duration = document.getElementById('banDuration')
+  if (!dialog || !reason || !duration) return
+
+  banTargetUserId = user.ID_Usuario
+  if (targetName) targetName.textContent = `${user.Nombre_Completo} (${user.Gmail})`
+  reason.value = user.Motivo_Veto || ''
+  const remainingDays = user.Veto_Hasta
+    ? Math.ceil((new Date(user.Veto_Hasta.replace(' ', 'T') + 'Z').getTime() - Date.now()) / 86400000)
+    : 7
+  duration.value = String(Math.min(365, Math.max(1, remainingDays)))
+  dialog.showModal()
+}
+
 async function loadProfiles(page = 1) {
   const container = document.getElementById('profilesContainer')
   const pagination = document.getElementById('profilesPagination')
@@ -584,7 +604,7 @@ async function loadProfiles(page = 1) {
 
     const thead = document.createElement('thead')
     const headerRow = document.createElement('tr')
-    const headers = ['Nombre', 'Gmail', 'Tipo', 'Estado', 'Acciones']
+    const headers = ['Nombre', 'Gmail', 'Tipo', 'Curso', 'Estado', 'Acciones']
     headers.forEach(h => {
       const th = document.createElement('th')
       th.textContent = h
@@ -609,42 +629,79 @@ async function loadProfiles(page = 1) {
       typeCell.textContent = user.Tipo || '-'
       row.appendChild(typeCell)
 
+      const courseCell = document.createElement('td')
+      if (user.Tipo === 'Alumno') {
+        const courseControl = document.createElement('div')
+        courseControl.className = 'course-control'
+        const courseSelect = document.createElement('select')
+        courseSelect.setAttribute('aria-label', `Curso de ${user.Nombre_Completo}`)
+        const unassigned = document.createElement('option')
+        unassigned.value = ''
+        unassigned.textContent = 'Sin asignar'
+        courseSelect.appendChild(unassigned)
+        for (let course = 1; course <= 6; course += 1) {
+          const option = document.createElement('option')
+          option.value = String(course)
+          option.textContent = `${course}.º`
+          courseSelect.appendChild(option)
+        }
+        courseSelect.value = user.Curso ? String(user.Curso) : ''
+        const saveCourseBtn = document.createElement('button')
+        saveCourseBtn.type = 'button'
+        saveCourseBtn.textContent = 'Guardar'
+        saveCourseBtn.addEventListener('click', async () => {
+          if (await updateUserCourse(user.ID_Usuario, courseSelect.value ? Number(courseSelect.value) : null)) {
+            loadProfiles(page)
+          }
+        })
+        courseControl.append(courseSelect, saveCourseBtn)
+        courseCell.appendChild(courseControl)
+      } else {
+        courseCell.textContent = '—'
+      }
+      row.appendChild(courseCell)
+
       const stateCell = document.createElement('td')
       stateCell.textContent = user.Estado || 'no vetado'
+      if (user.Estado === 'vetado') {
+        const banDetails = document.createElement('small')
+        banDetails.className = 'ban-details'
+        banDetails.textContent = `${user.Motivo_Veto || 'Sin motivo'} · hasta ${user.Veto_Hasta || 'indefinido'} UTC`
+        stateCell.appendChild(document.createElement('br'))
+        stateCell.appendChild(banDetails)
+      }
       row.appendChild(stateCell)
 
       const actionCell = document.createElement('td')
+      const actions = document.createElement('div')
+      actions.className = 'profile-actions'
       if (user.Estado === 'vetado') {
         const unbanBtn = document.createElement('button')
         unbanBtn.type = 'button'
         unbanBtn.textContent = 'Desvetar'
-        unbanBtn.style.background = '#4caf50'
-        unbanBtn.style.color = 'white'
-        unbanBtn.style.border = 'none'
-        unbanBtn.style.padding = '6px 12px'
-        unbanBtn.style.borderRadius = '4px'
-        unbanBtn.style.cursor = 'pointer'
         unbanBtn.addEventListener('click', async () => {
-          await unbanUser(user.ID_Usuario)
-          loadProfiles(page)
+          if (await unbanUser(user.ID_Usuario)) loadProfiles(page)
         })
-        actionCell.appendChild(unbanBtn)
-      } else {
-        const banBtn = document.createElement('button')
-        banBtn.type = 'button'
-        banBtn.textContent = 'Vetar'
-        banBtn.style.background = '#f44336'
-        banBtn.style.color = 'white'
-        banBtn.style.border = 'none'
-        banBtn.style.padding = '6px 12px'
-        banBtn.style.borderRadius = '4px'
-        banBtn.style.cursor = 'pointer'
-        banBtn.addEventListener('click', async () => {
-          await banUser(user.ID_Usuario)
-          loadProfiles(page)
-        })
-        actionCell.appendChild(banBtn)
+        actions.appendChild(unbanBtn)
       }
+      const banBtn = document.createElement('button')
+      banBtn.type = 'button'
+      banBtn.textContent = user.Estado === 'vetado' ? 'Editar veto' : 'Vetar'
+      banBtn.addEventListener('click', () => openBanDialog(user))
+      actions.appendChild(banBtn)
+
+      if (user.Tipo === 'Alumno' && Number(user.Curso) === 6) {
+        const deleteBtn = document.createElement('button')
+        deleteBtn.type = 'button'
+        deleteBtn.className = 'danger-button'
+        deleteBtn.textContent = 'Eliminar egresado'
+        deleteBtn.addEventListener('click', async () => {
+          if (!confirm(`¿Eliminar definitivamente el perfil de ${user.Nombre_Completo}?`)) return
+          await deleteGraduatedStudent(user.ID_Usuario, page)
+        })
+        actions.appendChild(deleteBtn)
+      }
+      actionCell.appendChild(actions)
       row.appendChild(actionCell)
       tbody.appendChild(row)
     })
@@ -665,38 +722,69 @@ async function loadProfiles(page = 1) {
   }
 }
 
-// Vetar usuario
-async function banUser(userId) {
+async function updateUserCourse(userId, course) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId + '/course', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ Curso: course })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      if (msg) {
+        msg.textContent = 'Curso actualizado correctamente'
+        msg.style.color = 'green'
+      }
+      return true
+    } else {
+      if (msg) {
+        msg.textContent = 'Error actualizando curso: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return false
+    }
+  } catch (e) {
+    console.error('Error actualizando curso:', e)
+    if (msg) {
+      msg.textContent = 'Error actualizando curso'
+      msg.style.color = 'red'
+    }
+    return false
+  }
+}
+
+async function banUser(userId, reason, durationDays) {
   const msg = document.getElementById('profilesMsg')
   try {
     const res = await fetch('/api/users/' + userId + '/state', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ Estado: 'vetado' })
+      body: JSON.stringify({ Estado: 'vetado', Motivo: reason, Duracion_Dias: durationDays })
     })
     const data = await res.json()
-    if (res.ok) {
-      if (msg) {
-        msg.textContent = 'Usuario vetado correctamente'
-        msg.style.color = 'green'
-      }
-      loadProfiles()
-    } else {
+    if (!res.ok) {
       if (msg) {
         msg.textContent = 'Error vetando usuario: ' + (data.detail || 'Error')
         msg.style.color = 'red'
       }
+      return false
     }
+    if (msg) {
+      msg.textContent = 'Veto temporal actualizado correctamente'
+      msg.style.color = 'green'
+    }
+    return true
   } catch (e) {
     console.error('Error vetando usuario:', e)
     if (msg) {
       msg.textContent = 'Error vetando usuario'
       msg.style.color = 'red'
     }
+    return false
   }
 }
 
-// Desvetar usuario
 async function unbanUser(userId) {
   const msg = document.getElementById('profilesMsg')
   try {
@@ -711,17 +799,48 @@ async function unbanUser(userId) {
         msg.textContent = 'Usuario desvetado correctamente'
         msg.style.color = 'green'
       }
-      loadProfiles()
+      return true
     } else {
       if (msg) {
         msg.textContent = 'Error desvetando usuario: ' + (data.detail || 'Error')
         msg.style.color = 'red'
       }
+      return false
     }
   } catch (e) {
     console.error('Error desvetando usuario:', e)
     if (msg) {
       msg.textContent = 'Error desvetando usuario'
+      msg.style.color = 'red'
+    }
+    return false
+  }
+}
+
+async function deleteGraduatedStudent(userId, page) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (msg) {
+        msg.textContent = 'No se pudo eliminar el alumno: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return
+    }
+    if (msg) {
+      msg.textContent = 'Perfil de egresado eliminado; el historial se conservó.'
+      msg.style.color = 'green'
+    }
+    loadProfiles(page)
+  } catch (e) {
+    console.error('Error eliminando egresado:', e)
+    if (msg) {
+      msg.textContent = 'Error de conexión al eliminar el egresado'
       msg.style.color = 'red'
     }
   }
@@ -731,6 +850,35 @@ async function unbanUser(userId) {
 function setupEventListeners() {
   // Vincula los controles HTML a las funciones de negocio del frontend.
   // Esto deja el DOM listo para responder a interacciones del usuario.
+
+  const banForm = document.getElementById('banForm')
+  const banDialog = document.getElementById('banDialog')
+  const cancelBanBtn = document.getElementById('cancelBanBtn')
+  if (banForm && banDialog) {
+    banForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const reason = document.getElementById('banReason').value.trim()
+      const duration = Number(document.getElementById('banDuration').value)
+      if (!banTargetUserId) return
+      if (await banUser(banTargetUserId, reason, duration)) {
+        banDialog.close()
+        banForm.reset()
+        banTargetUserId = null
+        loadProfiles(profilesState.page)
+      }
+    })
+  }
+  if (cancelBanBtn && banDialog) {
+    cancelBanBtn.addEventListener('click', () => {
+      banDialog.close()
+      banTargetUserId = null
+    })
+  }
+  if (banDialog) {
+    banDialog.addEventListener('close', () => {
+      banTargetUserId = null
+    })
+  }
 
   // Inicio de sesión
   const loginForm = document.getElementById('loginForm')
@@ -755,7 +903,6 @@ function setupEventListeners() {
         if (msg) msg.textContent = ''
         e.target.reset()
         showView('home')
-        doSearch()
       } else {
         if (msg) {
           msg.textContent = 'Error: ' + (j.detail || 'Error')
@@ -791,7 +938,7 @@ function setupEventListeners() {
         }
         e.target.reset()
         switchAuthTab('login')
-        setTimeout(() => { showView('home'); doSearch() }, 1000)
+        setTimeout(() => showView('home'), 1000)
       } else {
         if (msg) {
           msg.textContent = 'Error: ' + (j.detail || 'Error')
@@ -1074,51 +1221,6 @@ function setupEventListeners() {
     }
   }
 
-  const clearReservasBtn = document.getElementById('clearReservasBtn')
-  const clearBajasBtn = document.getElementById('clearBajasBtn')
-  if (clearReservasBtn) {
-    clearReservasBtn.addEventListener('click', async () => {
-      if (!confirm('¿Eliminar todos los registros de reservas del historial?')) return
-      const res = await fetch('/api/history/reservas', {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      })
-      const j = await res.json()
-      const msg = document.getElementById('historyMsg')
-      if (res.ok) {
-        if (msg) {
-          msg.textContent = 'Historial de reservas eliminado.'
-          msg.style.color = 'green'
-        }
-        if (historyCurrentTab === 'reservas') loadHistoryReservas()
-      } else if (msg) {
-        msg.textContent = 'Error: ' + (j.detail || 'Error')
-        msg.style.color = 'red'
-      }
-    })
-  }
-  if (clearBajasBtn) {
-    clearBajasBtn.addEventListener('click', async () => {
-      if (!confirm('¿Eliminar todos los registros de bajas de stock?')) return
-      const res = await fetch('/api/history/bajas', {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      })
-      const j = await res.json()
-      const msg = document.getElementById('historyMsg')
-      if (res.ok) {
-        if (msg) {
-          msg.textContent = 'Historial de bajas eliminado.'
-          msg.style.color = 'green'
-        }
-        if (historyCurrentTab === 'bajas') loadHistoryBajas()
-      } else if (msg) {
-        msg.textContent = 'Error: ' + (j.detail || 'Error')
-        msg.style.color = 'red'
-      }
-    })
-  }
-
   // Los eventos quedan listos para la interacción del usuario.
 }
 
@@ -1188,7 +1290,6 @@ try {
         }
         e.target.reset()
         showView('home')
-        doSearch()
       } else {
         if (msg) {
           msg.textContent = 'Error: ' + (j.detail || 'Error')
@@ -1206,5 +1307,3 @@ console.log('[APP] Configuración completa, esperando el DOM...')
 
 
 console.log('[APP] Interceptor global de formularios agregado')
-
-
