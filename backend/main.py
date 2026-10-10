@@ -846,6 +846,47 @@ def get_history_reservas(request: Request, page: int = 1, limit: int = 20):
         return {'total': int(total), 'page': page, 'pages': pages, 'reservas': records}
 
 
+@app.get('/api/history/devoluciones-pendientes')
+@require_role('Bibliotecario')
+def get_history_devoluciones_pendientes(request: Request, page: int = 1, limit: int = 20):
+    page, limit = normalize_pagination(page, limit)
+    with engine.connect() as conn:
+        total = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM Reserva_Ejemplares r "
+                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
+                "WHERE r.Fecha_Expiracion_Reserva >= NOW()"
+            )
+        ).scalar() or 0
+        pages = max(1, (int(total) + limit - 1) // limit)
+        offset = (page - 1) * limit
+        res = conn.execute(
+            text(
+                "SELECT r.ID_Reserva, r.Codigo_reserva, lib.Titulo, u.Nombre_Completo, u.Tipo, r.Cantidad, r.Fecha_Expiracion_Reserva "
+                "FROM Reserva_Ejemplares r "
+                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
+                "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
+                "WHERE r.Fecha_Expiracion_Reserva >= NOW() "
+                "ORDER BY r.Fecha_Expiracion_Reserva ASC, u.Nombre_Completo ASC, r.ID_Reserva DESC "
+                "LIMIT :limit OFFSET :offset"
+            ),
+            {'limit': limit, 'offset': offset}
+        )
+        records = []
+        for row in res.fetchall():
+            records.append({
+                'ID_Reserva': row[0],
+                'Codigo_reserva': row[1],
+                'Libro': row[2],
+                'Profesor': row[3] or 'Sin asignar',
+                'Tipo_Usuario': row[4] or 'Sin tipo',
+                'Cantidad': row[5],
+                'Fecha_Limite': format_datetime(row[6]),
+                'Estado': 'Pendiente',
+            })
+        return {'total': int(total), 'page': page, 'pages': pages, 'devoluciones': records}
+
+
 @app.get('/api/history/bajas')
 @require_role('Bibliotecario')
 def get_history_bajas(request: Request, page: int = 1, limit: int = 20):

@@ -112,6 +112,7 @@
           <div class="history-controls" style="margin-top:12px;">
             <div class="history-tabs" style="display:flex; gap:8px; margin-bottom:8px;">
               <button type="button" class="history-tab-btn active" data-tab="reservas">Reservas</button>
+              <button type="button" class="history-tab-btn" data-tab="devoluciones">Devoluciones</button>
               <button type="button" class="history-tab-btn" data-tab="bajas">Bajas de stock</button>
             </div>
             <div class="history-actions" style="display:flex; gap:8px;">
@@ -121,9 +122,11 @@
           </div>
           <div id="historyContainers" style="margin-top:12px;">
             <div id="history-reservas" style="overflow-x:auto;"></div>
+            <div id="history-devoluciones" style="display:none; overflow-x:auto;"></div>
             <div id="history-bajas" style="display:none; overflow-x:auto;"></div>
           </div>
           <div id="historyReservasPagination" class="pagination"></div>
+          <div id="historyDevolucionesPagination" class="pagination"></div>
           <div id="historyBajasPagination" class="pagination"></div>
           <div id="historyMsg" class="msg"></div>
         </section>

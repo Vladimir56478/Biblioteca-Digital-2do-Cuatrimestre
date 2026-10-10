@@ -63,6 +63,7 @@ button[type=submit]{background:var(--accent);color:white;padding:12px;border-rad
 .history-table th{background:#f3f3f3;color:#333}
 .history-table tr:nth-child(even){background:#fafafa}
 .history-table td{color:#444}
+.history-table td:last-child{font-weight:700;color:var(--accent)}
 
 .pagination{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px}
 .pagination button{border:1px solid #dcd7d7;background:#fff;color:#333;padding:8px 12px;border-radius:8px;cursor:pointer;min-width:38px}

@@ -291,13 +291,21 @@ function switchHistorySubtab(tab) {
     btn.classList.toggle('active', btn.getAttribute('data-tab') === tab)
   })
   const reservasEl = document.getElementById('history-reservas')
+  const devolucionesEl = document.getElementById('history-devoluciones')
   const bajasEl = document.getElementById('history-bajas')
   if (tab === 'reservas') {
     if (reservasEl) reservasEl.style.display = 'block'
+    if (devolucionesEl) devolucionesEl.style.display = 'none'
     if (bajasEl) bajasEl.style.display = 'none'
     loadHistoryReservas()
+  } else if (tab === 'devoluciones') {
+    if (reservasEl) reservasEl.style.display = 'none'
+    if (devolucionesEl) devolucionesEl.style.display = 'block'
+    if (bajasEl) bajasEl.style.display = 'none'
+    loadHistoryDevoluciones()
   } else {
     if (reservasEl) reservasEl.style.display = 'none'
+    if (devolucionesEl) devolucionesEl.style.display = 'none'
     if (bajasEl) bajasEl.style.display = 'block'
     loadHistoryBajas()
   }
@@ -309,6 +317,7 @@ async function loadHistoryLogs() {
 
 const historyState = {
   reservas: { page: 1, limit: 10, pages: 1 },
+  devoluciones: { page: 1, limit: 10, pages: 1 },
   bajas: { page: 1, limit: 10, pages: 1 }
 }
 
@@ -350,6 +359,48 @@ async function loadHistoryReservas(page = 1) {
     console.error('Error al cargar reservas:', e)
     if (msg) {
       msg.textContent = 'Error cargando reservas'
+      msg.style.color = 'red'
+    }
+  }
+}
+
+async function loadHistoryDevoluciones(page = 1) {
+  const container = document.getElementById('history-devoluciones')
+  const pagination = document.getElementById('historyDevolucionesPagination')
+  const msg = document.getElementById('historyMsg')
+  if (!container) return
+  if (msg) msg.textContent = ''
+
+  try {
+    const res = await fetch('/api/history/devoluciones-pendientes?page=' + page + '&limit=' + historyState.devoluciones.limit, {
+      headers: getAuthHeaders()
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (msg) {
+        msg.textContent = 'Error cargando devoluciones: ' + (data.detail || 'Error')
+        msg.style.color = 'red'
+      }
+      return
+    }
+
+    const columns = [
+      { key: 'Profesor', label: 'Profesor' },
+      { key: 'Libro', label: 'Libro' },
+      { key: 'Fecha_Limite', label: 'Fecha límite' },
+      { key: 'Cantidad', label: 'Cantidad' },
+      { key: 'Estado', label: 'Estado' }
+    ]
+    renderHistoryTable(columns, data.devoluciones || [], container, msg)
+    historyState.devoluciones.page = data.page
+    historyState.devoluciones.pages = data.pages
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, newPage => loadHistoryDevoluciones(newPage))
+    }
+  } catch (e) {
+    console.error('Error al cargar devoluciones pendientes:', e)
+    if (msg) {
+      msg.textContent = 'Error cargando devoluciones pendientes'
       msg.style.color = 'red'
     }
   }
