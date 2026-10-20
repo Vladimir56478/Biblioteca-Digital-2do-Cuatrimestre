@@ -1068,8 +1068,8 @@ def get_history_devoluciones_pendientes(request: Request, page: int = 1, limit: 
         total = conn.execute(
             text(
                 "SELECT COUNT(*) FROM Reserva_Ejemplares r "
-                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
-                "WHERE r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP()"
+                "JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
+                "WHERE u.Tipo = 'Profesor' AND r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP()"
             )
         ).scalar() or 0
         pages = max(1, (int(total) + limit - 1) // limit)
@@ -1078,9 +1078,9 @@ def get_history_devoluciones_pendientes(request: Request, page: int = 1, limit: 
             text(
                 "SELECT r.ID_Reserva, r.Codigo_reserva, lib.Titulo, u.Nombre_Completo, u.Tipo, r.Cantidad, r.Fecha_Expiracion_Reserva "
                 "FROM Reserva_Ejemplares r "
-                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
+                "JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
                 "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
-                "WHERE r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP() "
+                "WHERE u.Tipo = 'Profesor' AND r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP() "
                 "ORDER BY r.Fecha_Expiracion_Reserva ASC, u.Nombre_Completo ASC, r.ID_Reserva DESC "
                 "LIMIT :limit OFFSET :offset"
             ),
