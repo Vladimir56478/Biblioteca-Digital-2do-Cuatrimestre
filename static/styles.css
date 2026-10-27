@@ -179,6 +179,99 @@ main > section {
   line-height: 1.2;
 }
 
+.loan-panel,
+.loan-card {
+  margin: 0 0 20px;
+  padding: clamp(16px, 3vw, 24px);
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: linear-gradient(145deg, #fff, #f8fbf9);
+  box-shadow: 0 8px 24px rgba(29, 65, 54, 0.05);
+}
+
+.loan-panel h2,
+.loan-card h3 {
+  margin: 0 0 14px;
+  color: var(--accent-dark);
+  font-size: 19px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.form-grid label,
+.loan-filters label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.form-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.loan-filters,
+.loan-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin: 12px 0 18px;
+}
+
+.loan-tabs {
+  align-items: center;
+}
+
+.loan-filters label {
+  flex: 1 1 145px;
+}
+
+.loan-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.loan-card {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.loan-card h3 {
+  font-size: 16px;
+}
+
+.loan-card p {
+  margin: 5px 0;
+  color: #53645f;
+  font-size: 13px;
+}
+
+.loan-card button {
+  margin-top: 12px;
+}
+
+.book-title {
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.book-stock {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+
 #view-home > .section-title:first-child {
   margin-bottom: 22px;
 }
@@ -635,13 +728,16 @@ button[type="submit"]:hover,
   }
 
   #view-admin form,
-  #view-reserve form {
+  #view-loans form,
+  #view-home .form-grid {
     max-width: 760px;
   }
 
   #view-profiles,
   #view-history,
-  #view-edit {
+  #view-edit,
+  #view-loans,
+  #view-my-loans {
     max-width: 1200px;
     margin: 0 auto;
   }
@@ -821,6 +917,22 @@ button[type="submit"]:hover,
 
   .history-table {
     min-width: 650px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-note {
+    grid-column: auto;
+  }
+
+  .loan-filters {
+    align-items: stretch;
+  }
+
+  .loan-filters label {
+    flex-basis: calc(50% - 8px);
   }
 }
 

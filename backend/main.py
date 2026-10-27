@@ -1,13 +1,7 @@
-"""API principal de Lorekeeper.
-
-Este módulo concentra la lógica del backend: define los endpoints para
-autenticación, gestión de libros, reservas y el montaje de archivos estáticos.
-"""
+"""API principal de Lorekeeper para catálogo, préstamos y perfiles."""
 
 import datetime
 import inspect
-import random
-import string
 from functools import wraps
 from pathlib import Path
 
@@ -20,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from backend.db import get_engine
-from backend.user_deletion import ensure_no_pending_returns
+from backend.user_deletion import ensure_no_active_loans
 
 app = FastAPI(title='Lorekeeper API')
 
@@ -31,6 +25,10 @@ def current_timestamp() -> str:
 
 def format_datetime(value) -> str | None:
     return value.strftime('%Y-%m-%d %H:%M:%S') if value else None
+
+
+def format_date(value) -> str | None:
+    return value.strftime('%Y-%m-%d') if value else None
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,13 +44,12 @@ engine = get_engine()
 # Las rutas reutilizan esta conexión para mantener la lógica de datos clara y compartida.
 # La aplicación no vuelve a crear el engine en cada petición.
 # La conexión ya quedó preparada en el módulo de base de datos y se reutiliza
-# para todas las operaciones de la biblioteca: usuarios, libros, reservas y reportes.
+# para todas las operaciones de la biblioteca: usuarios, libros, préstamos y reportes.
 
 # Aquí se definen los roles base y los usuarios iniciales que van a poder entrar al sistema.
 ADMIN_EMAIL = 'Bibliotecario.fanoba@tecnica29de6.edu.ar'
 PROTECTED_ROUTE_ROLES = {
     '/api/books': {'Bibliotecario'},
-    '/api/reserve': {'Alumno', 'Profesor', 'Bibliotecario'},
 }
 
 DEFAULT_USERS = [
@@ -80,8 +77,6 @@ VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 
 # Al iniciar la API se revisa y actualiza el esquema si hace falta.
-# Esto permite que el backend se ejecute en bases de datos existentes
-# sin fallar por columnas nuevas o tablas que no estaban definidas antes.
 def ensure_user_state_column():
     try:
         with engine.begin() as conn:
@@ -159,7 +154,7 @@ def ensure_baja_ejemplares_table():
 
 ensure_baja_ejemplares_table()
 
-VALID_LOG_TYPES = {'Reserva Creada', 'Préstamo Activo', 'Préstamo Devuelto', 'Stock Reducido'}
+VALID_LOG_TYPES = {'Préstamo Activo', 'Préstamo Devuelto', 'Stock Reducido'}
 
 
 def ensure_log_sistema_table():
@@ -204,13 +199,13 @@ def ensure_user_management_columns():
             for row in conn.execute(
                 text(
                     "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN "
-                    "('Usuario', 'Reserva_Ejemplares', 'Log_Sistema')"
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('Usuario', 'Log_Sistema')"
                 )
             ).fetchall()
         }
         user_columns = {
             'Curso': "ALTER TABLE Usuario ADD COLUMN Curso TINYINT UNSIGNED NULL",
+            'Division': "ALTER TABLE Usuario ADD COLUMN Division TINYINT UNSIGNED NULL",
             'Motivo_Veto': "ALTER TABLE Usuario ADD COLUMN Motivo_Veto VARCHAR(255) NULL",
             'Veto_Hasta': "ALTER TABLE Usuario ADD COLUMN Veto_Hasta DATETIME NULL",
         }
@@ -218,19 +213,24 @@ def ensure_user_management_columns():
             if ('usuario', column.lower()) not in existing_columns:
                 conn.execute(text(statement))
 
-        for table in ('Reserva_Ejemplares', 'Log_Sistema'):
-            if (table.lower(), 'id_usuario') not in existing_columns:
-                raise RuntimeError(f'No existe {table}.ID_Usuario; no se puede preservar el historial de usuarios')
+        table_exists = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Log_Sistema'"
+            )
+        ).fetchone()
+        if not table_exists:
+            raise RuntimeError('No existe Log_Sistema; no se puede preservar el historial de usuarios')
+        if ('log_sistema', 'id_usuario') not in existing_columns:
             nullable = conn.execute(
                 text(
                     "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Log_Sistema' "
                     "AND COLUMN_NAME = 'ID_Usuario'"
                 ),
-                {'table': table},
             ).scalar()
             if nullable == 'NO':
-                conn.execute(text(f'ALTER TABLE {table} MODIFY COLUMN ID_Usuario INT NULL'))
+                conn.execute(text('ALTER TABLE Log_Sistema MODIFY COLUMN ID_Usuario INT NULL'))
 
 
 ensure_user_management_columns()
@@ -251,17 +251,104 @@ def ensure_book_total_stock_column():
         conn.execute(text(
             "ALTER TABLE Libro ADD COLUMN Stock_Total INT NOT NULL DEFAULT 0"
         ))
-        conn.execute(text(
-            "UPDATE Libro l "
-            "LEFT JOIN ("
-            "SELECT ID_Libro, SUM(Cantidad) AS Cantidad_Reservada "
-            "FROM Reserva_Ejemplares GROUP BY ID_Libro"
-            ") reservas ON reservas.ID_Libro = l.ID_Libro "
-            "SET l.Stock_Total = l.Stock + COALESCE(reservas.Cantidad_Reservada, 0)"
-        ))
+        conn.execute(text("UPDATE Libro SET Stock_Total = Stock"))
 
 
 ensure_book_total_stock_column()
+
+
+def ensure_loan_schema():
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS Cuaderno_Diario ("
+            "ID_Cuaderno INT NOT NULL AUTO_INCREMENT, "
+            "ID_Libro INT NOT NULL, "
+            "ID_Responsable INT NULL, Responsable_Nombre VARCHAR(100) NOT NULL, "
+            "ID_Retira INT NULL, Retira_Nombre VARCHAR(100) NULL, "
+            "ID_Bibliotecaria INT NOT NULL, Cantidad INT UNSIGNED NOT NULL, "
+            "Curso TINYINT UNSIGNED NOT NULL, Division TINYINT UNSIGNED NOT NULL, "
+            "Fecha_Prestamo DATE NOT NULL, Fecha_Vencimiento DATE NOT NULL, "
+            "Fecha_Devolucion DATE NULL, Estado VARCHAR(20) NOT NULL DEFAULT 'Activo', "
+            "PRIMARY KEY (ID_Cuaderno), "
+            "INDEX idx_cuaderno_estado_responsable (Estado, ID_Responsable), "
+            "INDEX idx_cuaderno_libro_estado (ID_Libro, Estado), "
+            "INDEX idx_cuaderno_fecha (Fecha_Prestamo), "
+            "CONSTRAINT fk_cuaderno_libro FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
+            "CONSTRAINT fk_cuaderno_responsable FOREIGN KEY (ID_Responsable) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_cuaderno_retira FOREIGN KEY (ID_Retira) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_cuaderno_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES Usuario(ID_Usuario), "
+            "CONSTRAINT chk_cuaderno_cantidad CHECK (Cantidad > 0), "
+            "CONSTRAINT chk_cuaderno_curso CHECK (Curso BETWEEN 1 AND 6), "
+            "CONSTRAINT chk_cuaderno_division CHECK (Division BETWEEN 1 AND 10), "
+            "CONSTRAINT chk_cuaderno_estado CHECK (Estado IN ('Activo', 'Devuelto'))"
+            ") ENGINE=InnoDB"
+        ))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS Ficha_Domiciliaria ("
+            "ID_Ficha INT NOT NULL AUTO_INCREMENT, "
+            "ID_Libro INT NOT NULL, "
+            "ID_Responsable INT NULL, Responsable_Nombre VARCHAR(100) NOT NULL, "
+            "ID_Bibliotecaria INT NOT NULL, Cantidad INT UNSIGNED NOT NULL, "
+            "Apellido VARCHAR(100) NOT NULL, Nombre VARCHAR(100) NOT NULL, "
+            "DNI VARCHAR(30) NOT NULL, Telefono VARCHAR(40) NOT NULL, "
+            "Curso TINYINT UNSIGNED NOT NULL, Division TINYINT UNSIGNED NOT NULL, "
+            "Dias INT UNSIGNED NOT NULL, Fecha_Prestamo DATE NOT NULL, Fecha_Vencimiento DATE NOT NULL, "
+            "Fecha_Devolucion DATE NULL, Estado VARCHAR(20) NOT NULL DEFAULT 'Activo', "
+            "PRIMARY KEY (ID_Ficha), "
+            "INDEX idx_ficha_estado_responsable (Estado, ID_Responsable), "
+            "INDEX idx_ficha_libro_estado (ID_Libro, Estado), "
+            "INDEX idx_ficha_fecha (Fecha_Prestamo), "
+            "CONSTRAINT fk_ficha_libro FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
+            "CONSTRAINT fk_ficha_responsable FOREIGN KEY (ID_Responsable) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_ficha_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES Usuario(ID_Usuario), "
+            "CONSTRAINT chk_ficha_cantidad CHECK (Cantidad > 0), "
+            "CONSTRAINT chk_ficha_curso CHECK (Curso BETWEEN 1 AND 6), "
+            "CONSTRAINT chk_ficha_division CHECK (Division BETWEEN 1 AND 10), "
+            "CONSTRAINT chk_ficha_dias CHECK (Dias > 0), "
+            "CONSTRAINT chk_ficha_estado CHECK (Estado IN ('Activo', 'Devuelto'))"
+            ") ENGINE=InnoDB"
+        ))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS Schema_Migration ("
+            "Migration_Key VARCHAR(100) NOT NULL PRIMARY KEY, "
+            "Applied_At DATETIME NOT NULL"
+            ") ENGINE=InnoDB"
+        ))
+        legacy_table_exists = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Reserva_Ejemplares'"
+            )
+        ).fetchone()
+        stock_release_done = conn.execute(
+            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = 'release_legacy_reservation_stock_v1'")
+        ).fetchone()
+        if not stock_release_done:
+            if legacy_table_exists:
+                conn.execute(text(
+                    "UPDATE Libro l JOIN ("
+                    "SELECT ID_Libro, SUM(COALESCE(Cantidad, 0)) AS Cantidad "
+                    "FROM Reserva_Ejemplares GROUP BY ID_Libro"
+                    ") r ON r.ID_Libro = l.ID_Libro "
+                    "SET l.Stock = COALESCE(l.Stock, 0) + r.Cantidad"
+                ))
+            conn.execute(
+                text("INSERT INTO Schema_Migration (Migration_Key, Applied_At) VALUES "
+                     "('release_legacy_reservation_stock_v1', CURRENT_TIMESTAMP)")
+            )
+        legacy_cleanup_done = conn.execute(
+            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = 'remove_legacy_reservations_v1'")
+        ).fetchone()
+        if not legacy_cleanup_done:
+            if legacy_table_exists:
+                conn.execute(text("DELETE FROM Reserva_Ejemplares"))
+            conn.execute(
+                text("INSERT INTO Schema_Migration (Migration_Key, Applied_At) VALUES "
+                     "('remove_legacy_reservations_v1', CURRENT_TIMESTAMP)")
+            )
+
+
+ensure_loan_schema()
 
 
 class BookIn(BaseModel):
@@ -285,10 +372,25 @@ class BookUpdate(BaseModel):
     Motivo: str | None = None
 
 
-class ReserveIn(BaseModel):
-    ID_Libro: int
-    ID_Usuario: int
-    Cantidad: int = 1
+class SchoolLoanIn(BaseModel):
+    ID_Libro: int = Field(..., gt=0)
+    ID_Responsable: int = Field(..., gt=0)
+    ID_Retira: int | None = Field(None, gt=0)
+    Modalidad: str
+    Cantidad: int = Field(..., ge=1)
+    Curso: int = Field(..., ge=1, le=6)
+    Division: int = Field(..., ge=1, le=10)
+
+
+class HomeLoanIn(BaseModel):
+    ID_Libro: int = Field(..., gt=0)
+    ID_Responsable: int = Field(..., gt=0)
+    Cantidad: int = Field(..., ge=1)
+    Dias: int = Field(30, ge=1)
+    Apellido: str = Field(..., min_length=1, max_length=100)
+    Nombre: str = Field(..., min_length=1, max_length=100)
+    DNI: str = Field(..., min_length=1, max_length=30)
+    Telefono: str = Field(..., min_length=1, max_length=40)
 
 
 class StockReductionIn(BaseModel):
@@ -303,22 +405,9 @@ class UserStateUpdate(BaseModel):
     Duracion_Dias: int | None = Field(None, ge=1, le=365)
 
 
-class UserCourseUpdate(BaseModel):
-    Curso: int | None = Field(None, ge=1, le=6)
-
-
-def generate_res_code(conn) -> str:
-    # Genera códigos de reserva en formato RES-XXXX donde X es letra mayúscula o dígito
-    attempts = 0
-    while True:
-        suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-        code = f'RES-{suffix}'
-        r = conn.execute(text("SELECT 1 FROM Reserva_Ejemplares WHERE Codigo_reserva = :c"), {'c': code}).fetchone()
-        if not r:
-            return code
-        attempts += 1
-        if attempts > 10:
-            raise RuntimeError('Could not generate unique reservation code')
+class UserProfileUpdate(BaseModel):
+    Curso: int = Field(..., ge=1, le=6)
+    Division: int = Field(..., ge=1, le=10)
 
 
 class LoginIn(BaseModel):
@@ -409,7 +498,7 @@ def get_authenticated_user(
     with engine.begin() as conn:
         row = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, Curso "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, Curso, Division "
                 "FROM Usuario WHERE ID_Usuario = :id"
             ),
             {'id': user_id},
@@ -439,6 +528,7 @@ def get_authenticated_user(
         'Estado': row[3],
         'Tipo': actual_type,
         'Curso': row[7],
+        'Division': row[8],
     }
     request.state.user = user
     return user
@@ -531,22 +621,6 @@ def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
     return page, limit
 
 
-def get_user_reservation_limit(user_type: str) -> int:
-    if user_type == 'Profesor':
-        return 25
-    if user_type == 'Bibliotecario':
-        return 30
-    return 3
-
-
-def get_user_reserved_count(conn, user_id: int) -> int:
-    result = conn.execute(
-        text('SELECT COALESCE(SUM(Cantidad), 0) FROM Reserva_Ejemplares WHERE ID_Usuario = :id'),
-        {'id': user_id}
-    ).scalar()
-    return int(result or 0)
-
-
 @app.middleware('http')
 async def enforce_role_middleware(request: Request, call_next):
     if request.url.path in PROTECTED_ROUTE_ROLES:
@@ -634,7 +708,13 @@ def get_book(request: Request, book_id: int):
 def update_book(request: Request, book_id: int, book: BookUpdate):
     user = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
     with engine.begin() as conn:
-        current = conn.execute(text("SELECT Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock FROM Libro WHERE ID_Libro = :id"), {'id': book_id}).fetchone()
+        current = conn.execute(
+            text(
+                "SELECT Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock "
+                "FROM Libro WHERE ID_Libro = :id FOR UPDATE"
+            ),
+            {'id': book_id},
+        ).fetchone()
         if not current:
             raise HTTPException(status_code=404, detail='Libro no encontrado')
 
@@ -690,13 +770,17 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
 @require_role('Bibliotecario', require_admin_email=True)
 def delete_book(request: Request, book_id: int):
     with engine.begin() as conn:
-        existing = conn.execute(text('SELECT 1 FROM Libro WHERE ID_Libro = :id'), {'id': book_id}).fetchone()
+        existing = conn.execute(
+            text('SELECT 1 FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            {'id': book_id},
+        ).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail='Libro no encontrado')
 
         related_records = conn.execute(
             text(
-                "SELECT 1 FROM Reserva_Ejemplares WHERE ID_Libro = :id "
+                "SELECT 1 FROM Cuaderno_Diario WHERE ID_Libro = :id "
+                "UNION ALL SELECT 1 FROM Ficha_Domiciliaria WHERE ID_Libro = :id "
                 "UNION ALL SELECT 1 FROM Baja_Ejemplares WHERE ID_Libro = :id "
                 "UNION ALL SELECT 1 FROM Log_Sistema WHERE ID_Libro = :id LIMIT 1"
             ),
@@ -722,7 +806,10 @@ def stock_reduction(request: Request, data: StockReductionIn):
         raise HTTPException(status_code=400, detail='Cantidad inválida')
 
     with engine.begin() as conn:
-        book = conn.execute(text("SELECT Stock FROM Libro WHERE ID_Libro = :id"), {'id': data.ID_Libro}).fetchone()
+        book = conn.execute(
+            text("SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE"),
+            {'id': data.ID_Libro},
+        ).fetchone()
         if not book:
             raise HTTPException(status_code=404, detail='Libro no encontrado')
         if book[0] < data.Cantidad:
@@ -770,13 +857,13 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
 
         if len(allowed_roles) == 1:
             stmt = text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Motivo_Veto, Veto_Hasta "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, Motivo_Veto, Veto_Hasta "
                 "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo': allowed_roles[0], 'limit': limit, 'offset': offset}).fetchall()
         else:
             stmt = text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Motivo_Veto, Veto_Hasta "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, Motivo_Veto, Veto_Hasta "
                 "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1], 'limit': limit, 'offset': offset}).fetchall()
@@ -790,8 +877,9 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
             'Tipo': row[3],
             'Estado': row[4] or 'no vetado',
             'Curso': row[5],
-            'Motivo_Veto': row[6],
-            'Veto_Hasta': format_datetime(row[7]),
+            'Division': row[6],
+            'Motivo_Veto': row[7],
+            'Veto_Hasta': format_datetime(row[8]),
         })
     return {'total': int(total), 'page': page, 'pages': pages, 'users': users}
 
@@ -842,23 +930,30 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
     }
 
 
-@app.put('/api/users/{user_id}/course')
-@require_role('Bibliotecario')
-def update_user_course(request: Request, user_id: int, data: UserCourseUpdate):
+@app.get('/api/profile')
+@require_role('Alumno', 'Profesor')
+def get_profile(request: Request):
+    user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
+    return {
+        'ID_Usuario': user['ID_Usuario'],
+        'Curso': user['Curso'],
+        'Division': user['Division'],
+        'complete': user['Curso'] is not None and user['Division'] is not None,
+    }
+
+
+@app.put('/api/profile')
+@require_role('Alumno', 'Profesor')
+def update_profile(request: Request, data: UserProfileUpdate):
+    user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
     with engine.begin() as conn:
-        target = conn.execute(
-            text('SELECT Tipo FROM Usuario WHERE ID_Usuario = :id'),
-            {'id': user_id},
-        ).fetchone()
-        if not target:
-            raise HTTPException(status_code=404, detail='Usuario no encontrado')
-        if target[0] != 'Alumno':
-            raise HTTPException(status_code=400, detail='El curso solo se asigna a alumnos')
         conn.execute(
-            text('UPDATE Usuario SET Curso = :curso WHERE ID_Usuario = :id'),
-            {'curso': data.Curso, 'id': user_id},
+            text('UPDATE Usuario SET Curso = :curso, Division = :division WHERE ID_Usuario = :id'),
+            {'curso': data.Curso, 'division': data.Division, 'id': user['ID_Usuario']},
         )
-    return {'ok': True, 'ID_Usuario': user_id, 'Curso': data.Curso}
+    user['Curso'] = data.Curso
+    user['Division'] = data.Division
+    return {'ok': True, 'Curso': data.Curso, 'Division': data.Division}
 
 
 @app.delete('/api/users/{user_id}')
@@ -866,7 +961,7 @@ def update_user_course(request: Request, user_id: int, data: UserCourseUpdate):
 def delete_graduated_student(request: Request, user_id: int):
     with engine.begin() as conn:
         target = conn.execute(
-            text('SELECT Tipo, Curso FROM Usuario WHERE ID_Usuario = :id'),
+            text('SELECT Tipo, Curso FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
             {'id': user_id},
         ).fetchone()
         if not target:
@@ -877,12 +972,8 @@ def delete_graduated_student(request: Request, user_id: int):
                 detail='Solo se pueden eliminar alumnos de 6.º curso',
             )
 
-        ensure_no_pending_returns(conn, user_id)
+        ensure_no_active_loans(conn, user_id)
 
-        conn.execute(
-            text('UPDATE Reserva_Ejemplares SET ID_Usuario = NULL WHERE ID_Usuario = :id'),
-            {'id': user_id},
-        )
         conn.execute(
             text('UPDATE Log_Sistema SET ID_Usuario = NULL WHERE ID_Usuario = :id'),
             {'id': user_id},
@@ -898,7 +989,17 @@ def delete_graduated_student(request: Request, user_id: int):
 
 
 @app.get('/api/search')
-def search(title: str = '', page: int = 1, limit: int = 4):
+def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
+    user_id, _ = get_request_identity(request)
+    if user_id:
+        user = get_authenticated_user(request)
+        if user['Tipo'] in ('Alumno', 'Profesor') and (
+            user['Curso'] is None or user['Division'] is None
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail='Completa tu curso y división en tu perfil antes de consultar el catálogo',
+            )
     title = title.strip()
     page, limit = normalize_pagination(page, limit)
     q = f"%{title}%"
@@ -932,69 +1033,6 @@ def search(title: str = '', page: int = 1, limit: int = 4):
         return {'total': int(total), 'page': page, 'pages': pages, 'books': rows}
 
 
-# El flujo de reservas valida que el usuario tenga permisos, no esté vetado y no supere
-# el límite de ejemplares que corresponde a su tipo de cuenta.
-@app.post('/api/reserve')
-@require_role('Alumno', 'Profesor', 'Bibliotecario')
-def reserve(request: Request, data: ReserveIn):
-    user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor', 'Bibliotecario'])
-    if user['ID_Usuario'] != data.ID_Usuario:
-        raise HTTPException(status_code=403, detail='La reserva debe pertenecer al usuario autenticado')
-
-    if data.Cantidad <= 0:
-        raise HTTPException(status_code=400, detail='Cantidad inválida')
-
-    now = datetime.datetime.utcnow()
-    exp = now + datetime.timedelta(days=2)
-    with engine.begin() as conn:
-        # Se revisa si el usuario está habilitado para reservar.
-        u = conn.execute(text("SELECT Estado FROM Usuario WHERE ID_Usuario = :id"), {'id': data.ID_Usuario}).fetchone()
-        if not u:
-            raise HTTPException(status_code=404, detail='Usuario no encontrado')
-        if u[0] == 'vetado':
-            raise HTTPException(status_code=403, detail='Usuario vetado')
-
-        # Se valida cuántos ejemplares puede reservar según el rol del usuario.
-        reserved_count = get_user_reserved_count(conn, data.ID_Usuario)
-        limit = get_user_reservation_limit(user['Tipo'])
-        if reserved_count + data.Cantidad > limit:
-            raise HTTPException(
-                status_code=400,
-                detail=f'Has alcanzado el límite de reserva. {user["Tipo"]} puede reservar hasta {limit} ejemplar(es) en total. Actualmente tienes {reserved_count} reservados.'
-            )
-
-        # Se comprueba que haya stock suficiente antes de crear la reserva.
-        book = conn.execute(text("SELECT Stock FROM Libro WHERE ID_Libro = :id"), {'id': data.ID_Libro}).fetchone()
-        if not book:
-            raise HTTPException(status_code=404, detail='Libro no encontrado')
-        if book[0] < data.Cantidad:
-            raise HTTPException(status_code=400, detail='Stock insuficiente')
-
-        # Se genera un código de reserva único para identificar la operación en el historial.
-        code = generate_res_code(conn)
-
-        insert_stmt = text(
-            "INSERT INTO Reserva_Ejemplares (Codigo_reserva, ID_Libro, ID_Usuario, Cantidad, Fecha_Reserva, Fecha_Expiracion_Reserva)"
-            " VALUES (:code, :id_libro, :id_usuario, :cantidad, :f_res, :f_exp)"
-        )
-        params = {
-            'code': code,
-            'id_libro': data.ID_Libro,
-            'id_usuario': data.ID_Usuario,
-            'cantidad': data.Cantidad,
-            'f_res': now.strftime('%Y-%m-%d %H:%M:%S'),
-            'f_exp': exp.strftime('%Y-%m-%d %H:%M:%S'),
-        }
-        conn.execute(insert_stmt, params)
-
-        # Al confirmar la reserva, se descuenta el stock del libro para reflejar la disponibilidad real.
-        conn.execute(text("UPDATE Libro SET Stock = Stock - :c WHERE ID_Libro = :id"), {'c': data.Cantidad, 'id': data.ID_Libro})
-        insert_log(conn, 'Reserva Creada', data.ID_Usuario, data.ID_Libro, f'Reserva {code} de {data.Cantidad} ejemplar(es)')
-        insert_log(conn, 'Stock Reducido', data.ID_Usuario, data.ID_Libro, f'Stock reducido por reserva {code}')
-
-        return {'ok': True, 'Codigo_reserva': code}
-
-
 @app.get('/api/logs')
 @require_role('Bibliotecario')
 def get_logs(request: Request, limit: int = 50):
@@ -1026,79 +1064,423 @@ def get_logs(request: Request, limit: int = 50):
         return logs
 
 
-@app.get('/api/history/reservas')
-@require_role('Bibliotecario')
-def get_history_reservas(request: Request, page: int = 1, limit: int = 20):
-    page, limit = normalize_pagination(page, limit)
-    with engine.connect() as conn:
-        total = conn.execute(text('SELECT COUNT(*) FROM Reserva_Ejemplares')).scalar() or 0
-        pages = max(1, (int(total) + limit - 1) // limit)
-        offset = (page - 1) * limit
-        res = conn.execute(
-            text(
-                "SELECT r.ID_Reserva, r.Codigo_reserva, r.ID_Libro, lib.Titulo, r.ID_Usuario, u.Nombre_Completo, r.Cantidad, r.Fecha_Reserva, r.Fecha_Expiracion_Reserva "
-                "FROM Reserva_Ejemplares r "
-                "LEFT JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
-                "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
-                "ORDER BY r.ID_Reserva DESC LIMIT :limit OFFSET :offset"
-            ),
-            {'limit': limit, 'offset': offset}
-        )
-        records = []
-        for row in res.fetchall():
-            records.append({
-                'ID_Reserva': row[0],
-                'Codigo_reserva': row[1],
-                'ID_Libro': row[2],
-                'Libro': row[3],
-                'ID_Usuario': row[4],
-                'Usuario': row[5],
-                'Cantidad': row[6],
-                'Fecha_Reserva': format_datetime(row[7]),
-                'Fecha_Expiracion_Reserva': format_datetime(row[8]),
-            })
-        return {'total': int(total), 'page': page, 'pages': pages, 'reservas': records}
+LOAN_UNION_SQL = """
+SELECT 'escolar' AS Tipo, c.ID_Cuaderno AS ID_Prestamo, c.ID_Libro, l.Titulo AS Libro, a.Nombre AS Autor,
+       c.ID_Responsable, COALESCE(u.Nombre_Completo, c.Responsable_Nombre) AS Responsable,
+       c.ID_Retira, c.Retira_Nombre AS Retirado_Por, c.Cantidad, c.Curso, c.Division,
+       c.Fecha_Prestamo, c.Fecha_Vencimiento, c.Fecha_Devolucion, c.Estado,
+       NULL AS Apellido, NULL AS Nombre_Ficha, NULL AS DNI, NULL AS Telefono, NULL AS Dias
+FROM Cuaderno_Diario c
+JOIN Libro l ON l.ID_Libro = c.ID_Libro
+LEFT JOIN Autor a ON a.ID_Autor = l.ID_Autor
+LEFT JOIN Usuario u ON u.ID_Usuario = c.ID_Responsable
+UNION ALL
+SELECT 'domiciliario' AS Tipo, f.ID_Ficha AS ID_Prestamo, f.ID_Libro, l.Titulo AS Libro, a.Nombre AS Autor,
+       f.ID_Responsable, COALESCE(u.Nombre_Completo, f.Responsable_Nombre) AS Responsable,
+       NULL AS ID_Retira, NULL AS Retirado_Por, f.Cantidad, f.Curso, f.Division,
+       f.Fecha_Prestamo, f.Fecha_Vencimiento, f.Fecha_Devolucion, f.Estado,
+       f.Apellido, f.Nombre AS Nombre_Ficha, f.DNI, f.Telefono, f.Dias
+FROM Ficha_Domiciliaria f
+JOIN Libro l ON l.ID_Libro = f.ID_Libro
+LEFT JOIN Autor a ON a.ID_Autor = l.ID_Autor
+LEFT JOIN Usuario u ON u.ID_Usuario = f.ID_Responsable
+"""
 
 
-@app.get('/api/history/devoluciones-pendientes')
-@require_role('Bibliotecario')
-def get_history_devoluciones_pendientes(request: Request, page: int = 1, limit: int = 20):
+def loan_filters(tipo, estado, libro_id, persona, curso, division):
+    conditions = []
+    params: dict[str, object] = {}
+    if tipo and tipo != 'todos':
+        if tipo not in ('escolar', 'domiciliario'):
+            raise HTTPException(status_code=400, detail='Tipo de préstamo inválido')
+        conditions.append('Tipo = :tipo')
+        params['tipo'] = tipo
+    if estado and estado != 'todos':
+        if estado not in ('Activo', 'Devuelto'):
+            raise HTTPException(status_code=400, detail='Estado de préstamo inválido')
+        conditions.append('Estado = :estado')
+        params['estado'] = estado
+    if libro_id is not None:
+        if libro_id <= 0:
+            raise HTTPException(status_code=400, detail='Libro inválido')
+        conditions.append('ID_Libro = :libro_id')
+        params['libro_id'] = libro_id
+    if persona:
+        conditions.append('Responsable LIKE :persona')
+        params['persona'] = f'%{persona.strip()}%'
+    if curso is not None:
+        if not 1 <= curso <= 6:
+            raise HTTPException(status_code=400, detail='Curso inválido')
+        conditions.append('Curso = :curso')
+        params['curso'] = curso
+    if division is not None:
+        if not 1 <= division <= 10:
+            raise HTTPException(status_code=400, detail='División inválida')
+        conditions.append('Division = :division')
+        params['division'] = division
+    return (' WHERE ' + ' AND '.join(conditions) if conditions else ''), params
+
+
+def loan_record(row):
+    return {
+        'Tipo': row[0],
+        'ID_Prestamo': row[1],
+        'ID_Libro': row[2],
+        'Libro': row[3],
+        'Autor': row[4],
+        'ID_Responsable': row[5],
+        'Responsable': row[6],
+        'ID_Retira': row[7],
+        'Retirado_Por': row[8],
+        'Cantidad': row[9],
+        'Curso': row[10],
+        'Division': row[11],
+        'Fecha_Prestamo': format_date(row[12]),
+        'Fecha_Vencimiento': format_date(row[13]),
+        'Fecha_Devolucion': format_date(row[14]),
+        'Estado': row[15],
+        'Apellido': row[16],
+        'Nombre_Ficha': row[17],
+        'DNI': row[18],
+        'Telefono': row[19],
+        'Dias': row[20],
+    }
+
+
+def paginated_loans(conn, page, limit, filters, params, owner_id=None):
     page, limit = normalize_pagination(page, limit)
+    limit = min(limit, 100)
+    owner_filter = (
+        (' AND ' if filters else ' WHERE ') + 'ID_Responsable = :owner_id'
+        if owner_id is not None else ''
+    )
+    query = f'WITH loans AS ({LOAN_UNION_SQL})'
+    total = conn.execute(
+        text(query + ' SELECT COUNT(*) FROM loans' + filters + owner_filter),
+        {**params, **({'owner_id': owner_id} if owner_id is not None else {})},
+    ).scalar() or 0
+    pages = max(1, (int(total) + limit - 1) // limit)
+    page = min(page, pages)
+    rows = conn.execute(
+        text(
+            query + ' SELECT * FROM loans' + filters + owner_filter
+            + ' ORDER BY Fecha_Prestamo DESC, ID_Prestamo DESC LIMIT :limit OFFSET :offset'
+        ),
+        {
+            **params,
+            **({'owner_id': owner_id} if owner_id is not None else {}),
+            'limit': limit,
+            'offset': (page - 1) * limit,
+        },
+    ).fetchall()
+    return {'total': int(total), 'page': page, 'pages': pages, 'prestamos': [loan_record(row) for row in rows]}
+
+
+@app.get('/api/loan-users')
+@require_role('Bibliotecario', require_admin_email=True)
+def list_loan_users(request: Request):
     with engine.connect() as conn:
-        total = conn.execute(
+        rows = conn.execute(
             text(
-                "SELECT COUNT(*) FROM Reserva_Ejemplares r "
-                "JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
-                "WHERE u.Tipo = 'Profesor' AND r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP()"
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Curso, Division "
+                "FROM Usuario WHERE Tipo IN ('Alumno', 'Profesor') ORDER BY Tipo, Nombre_Completo"
             )
-        ).scalar() or 0
-        pages = max(1, (int(total) + limit - 1) // limit)
-        offset = (page - 1) * limit
-        res = conn.execute(
+        ).fetchall()
+    return [
+        {
+            'ID_Usuario': row[0],
+            'Nombre_Completo': row[1],
+            'Gmail': row[2],
+            'Tipo': row[3],
+            'Curso': row[4],
+            'Division': row[5],
+        }
+        for row in rows
+    ]
+
+
+@app.get('/api/loans')
+@require_role('Bibliotecario', require_admin_email=True)
+def list_all_loans(
+    request: Request,
+    tipo: str = 'todos',
+    estado: str = 'todos',
+    libro_id: int | None = None,
+    persona: str = '',
+    curso: int | None = None,
+    division: int | None = None,
+    page: int = 1,
+    limit: int = 20,
+):
+    filters, params = loan_filters(tipo, estado, libro_id, persona, curso, division)
+    with engine.connect() as conn:
+        return paginated_loans(conn, page, limit, filters, params)
+
+
+@app.get('/api/my-loans')
+@require_role('Alumno', 'Profesor')
+def list_my_loans(
+    request: Request,
+    estado: str = 'todos',
+    tipo: str = 'todos',
+    page: int = 1,
+    limit: int = 20,
+):
+    user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
+    filters, params = loan_filters(tipo, estado, None, '', None, None)
+    with engine.connect() as conn:
+        return paginated_loans(conn, page, limit, filters, params, user['ID_Usuario'])
+
+
+@app.post('/api/loans/school')
+@require_role('Bibliotecario', require_admin_email=True)
+def create_school_loan(request: Request, data: SchoolLoanIn):
+    librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
+    modalidad = data.Modalidad.strip()
+    if modalidad not in ('Alumno', 'Profesor', 'AlumnoPorProfesor'):
+        raise HTTPException(status_code=400, detail='Modalidad escolar inválida')
+    if (modalidad == 'AlumnoPorProfesor') != (data.ID_Retira is not None):
+        raise HTTPException(status_code=400, detail='Indica el alumno que retira solo para un préstamo por profesor')
+
+    today = datetime.date.today()
+    with engine.begin() as conn:
+        responsible = conn.execute(
             text(
-                "SELECT r.ID_Reserva, r.Codigo_reserva, lib.Titulo, u.Nombre_Completo, u.Tipo, r.Cantidad, r.Fecha_Expiracion_Reserva "
-                "FROM Reserva_Ejemplares r "
-                "JOIN Usuario u ON r.ID_Usuario = u.ID_Usuario "
-                "LEFT JOIN Libro lib ON r.ID_Libro = lib.ID_Libro "
-                "WHERE u.Tipo = 'Profesor' AND r.Fecha_Expiracion_Reserva >= UTC_TIMESTAMP() "
-                "ORDER BY r.Fecha_Expiracion_Reserva ASC, u.Nombre_Completo ASC, r.ID_Reserva DESC "
-                "LIMIT :limit OFFSET :offset"
+                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division "
+                "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
             ),
-            {'limit': limit, 'offset': offset}
+            {'id': data.ID_Responsable},
+        ).fetchone()
+        if not responsible:
+            raise HTTPException(status_code=404, detail='Cuenta responsable no encontrada')
+        expected_role = 'Alumno' if modalidad == 'Alumno' else 'Profesor'
+        if responsible[2] != expected_role:
+            raise HTTPException(status_code=400, detail=f'La cuenta responsable debe ser de tipo {expected_role}')
+        if responsible[3] == 'vetado':
+            raise HTTPException(status_code=403, detail='La cuenta responsable está vetada')
+        if responsible[4] is None or responsible[5] is None:
+            raise HTTPException(status_code=409, detail='La cuenta responsable debe completar curso y división')
+
+        retira = None
+        if data.ID_Retira is not None:
+            retira = conn.execute(
+                text("SELECT ID_Usuario, Nombre_Completo, Tipo FROM Usuario WHERE ID_Usuario = :id"),
+                {'id': data.ID_Retira},
+            ).fetchone()
+            if not retira:
+                raise HTTPException(status_code=404, detail='Cuenta del alumno que retira no encontrada')
+            if retira[2] != 'Alumno':
+                raise HTTPException(status_code=400, detail='Solo un alumno puede retirar por indicación docente')
+
+        active_school = conn.execute(
+            text(
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM Cuaderno_Diario "
+                "WHERE ID_Responsable = :id AND Estado = 'Activo'"
+            ),
+            {'id': data.ID_Responsable},
+        ).scalar() or 0
+        active_home = conn.execute(
+            text(
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM Ficha_Domiciliaria "
+                "WHERE ID_Responsable = :id AND Estado = 'Activo'"
+            ),
+            {'id': data.ID_Responsable},
+        ).scalar() or 0
+        if expected_role == 'Alumno' and int(active_school) + int(active_home) + data.Cantidad > 1:
+            raise HTTPException(status_code=409, detail='Un alumno solo puede tener 1 ejemplar escolar activo en total')
+        if expected_role == 'Profesor' and int(active_school) + int(active_home) + data.Cantidad > 45:
+            available = max(0, 45 - int(active_school) - int(active_home))
+            raise HTTPException(
+                status_code=409,
+                detail=f'El profesor solo tiene saldo disponible para {available} ejemplar(es) de su máximo de 45',
+            )
+
+        book = conn.execute(
+            text('SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            {'id': data.ID_Libro},
+        ).fetchone()
+        if not book:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+        if int(book[0] or 0) < data.Cantidad:
+            raise HTTPException(status_code=409, detail='Stock insuficiente')
+        conn.execute(
+            text('UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
+            {'cantidad': data.Cantidad, 'id': data.ID_Libro},
         )
-        records = []
-        for row in res.fetchall():
-            records.append({
-                'ID_Reserva': row[0],
-                'Codigo_reserva': row[1],
-                'Libro': row[2],
-                'Profesor': row[3] or 'Sin asignar',
-                'Tipo_Usuario': row[4] or 'Sin tipo',
-                'Cantidad': row[5],
-                'Fecha_Limite': format_datetime(row[6]),
-                'Estado': 'Pendiente',
-            })
-        return {'total': int(total), 'page': page, 'pages': pages, 'devoluciones': records}
+        result = conn.execute(
+            text(
+                "INSERT INTO Cuaderno_Diario "
+                "(ID_Libro, ID_Responsable, Responsable_Nombre, ID_Retira, Retira_Nombre, "
+                "ID_Bibliotecaria, Cantidad, Curso, Division, Fecha_Prestamo, Fecha_Vencimiento, Estado) "
+                "VALUES (:libro, :responsable, :responsable_nombre, :retira, :retira_nombre, "
+                ":bibliotecaria, :cantidad, :curso, :division, :fecha, :fecha, 'Activo')"
+            ),
+            {
+                'libro': data.ID_Libro,
+                'responsable': data.ID_Responsable,
+                'responsable_nombre': responsible[1],
+                'retira': retira[0] if retira else None,
+                'retira_nombre': retira[1] if retira else None,
+                'bibliotecaria': librarian['ID_Usuario'],
+                'cantidad': data.Cantidad,
+                'curso': data.Curso,
+                'division': data.Division,
+                'fecha': today,
+            },
+        )
+        loan_id = result.lastrowid
+        insert_log(
+            conn,
+            'Préstamo Activo',
+            data.ID_Responsable,
+            data.ID_Libro,
+            f'Cuaderno Diario #{loan_id}: {data.Cantidad} ejemplar(es), responsable {responsible[1]}',
+        )
+    return {'ok': True, 'ID_Prestamo': loan_id, 'Fecha_Prestamo': format_date(today), 'Fecha_Vencimiento': format_date(today)}
+
+
+@app.post('/api/loans/home')
+@require_role('Bibliotecario', require_admin_email=True)
+def create_home_loan(request: Request, data: HomeLoanIn):
+    librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
+    values = (data.Apellido.strip(), data.Nombre.strip(), data.DNI.strip(), data.Telefono.strip())
+    if not all(values):
+        raise HTTPException(status_code=400, detail='Apellido, nombre, DNI y teléfono son obligatorios')
+
+    today = datetime.date.today()
+    try:
+        due = today + datetime.timedelta(days=data.Dias)
+    except OverflowError as exc:
+        raise HTTPException(status_code=400, detail='La cantidad de días excede el calendario admitido') from exc
+    with engine.begin() as conn:
+        responsible = conn.execute(
+            text(
+                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division "
+                "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
+            ),
+            {'id': data.ID_Responsable},
+        ).fetchone()
+        if not responsible:
+            raise HTTPException(status_code=404, detail='Cuenta responsable no encontrada')
+        if responsible[2] != 'Profesor':
+            raise HTTPException(status_code=400, detail='El préstamo domiciliario solo puede asignarse a un profesor')
+        if responsible[3] == 'vetado':
+            raise HTTPException(status_code=403, detail='La cuenta responsable está vetada')
+        if responsible[4] is None or responsible[5] is None:
+            raise HTTPException(status_code=409, detail='El profesor debe completar curso y división en su perfil')
+
+        active_school = conn.execute(
+            text(
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM Cuaderno_Diario "
+                "WHERE ID_Responsable = :id AND Estado = 'Activo'"
+            ),
+            {'id': data.ID_Responsable},
+        ).scalar() or 0
+        active_home = conn.execute(
+            text(
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM Ficha_Domiciliaria "
+                "WHERE ID_Responsable = :id AND Estado = 'Activo'"
+            ),
+            {'id': data.ID_Responsable},
+        ).scalar() or 0
+        available = 45 - int(active_school) - int(active_home)
+        if data.Cantidad > available:
+            raise HTTPException(
+                status_code=409,
+                detail=f'El profesor solo tiene saldo disponible para {max(0, available)} ejemplar(es) de su máximo de 45',
+            )
+
+        book = conn.execute(
+            text('SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            {'id': data.ID_Libro},
+        ).fetchone()
+        if not book:
+            raise HTTPException(status_code=404, detail='Libro no encontrado')
+        if int(book[0] or 0) < data.Cantidad:
+            raise HTTPException(status_code=409, detail='Stock insuficiente')
+        conn.execute(
+            text('UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
+            {'cantidad': data.Cantidad, 'id': data.ID_Libro},
+        )
+        result = conn.execute(
+            text(
+                "INSERT INTO Ficha_Domiciliaria "
+                "(ID_Libro, ID_Responsable, Responsable_Nombre, ID_Bibliotecaria, Cantidad, "
+                "Apellido, Nombre, DNI, Telefono, Curso, Division, Dias, Fecha_Prestamo, "
+                "Fecha_Vencimiento, Estado) "
+                "VALUES (:libro, :responsable, :responsable_nombre, :bibliotecaria, :cantidad, "
+                ":apellido, :nombre, :dni, :telefono, :curso, :division, :dias, :fecha, :vencimiento, 'Activo')"
+            ),
+            {
+                'libro': data.ID_Libro,
+                'responsable': data.ID_Responsable,
+                'responsable_nombre': responsible[1],
+                'bibliotecaria': librarian['ID_Usuario'],
+                'cantidad': data.Cantidad,
+                'apellido': values[0],
+                'nombre': values[1],
+                'dni': values[2],
+                'telefono': values[3],
+                'curso': responsible[4],
+                'division': responsible[5],
+                'dias': data.Dias,
+                'fecha': today,
+                'vencimiento': due,
+            },
+        )
+        loan_id = result.lastrowid
+        insert_log(
+            conn,
+            'Préstamo Activo',
+            data.ID_Responsable,
+            data.ID_Libro,
+            f'Ficha Domiciliaria #{loan_id}: {data.Cantidad} ejemplar(es), vencimiento {format_date(due)}',
+        )
+    return {'ok': True, 'ID_Prestamo': loan_id, 'Fecha_Prestamo': format_date(today), 'Fecha_Vencimiento': format_date(due)}
+
+
+@app.post('/api/loans/{tipo}/{loan_id}/return')
+@require_role('Bibliotecario', require_admin_email=True)
+def return_loan(request: Request, tipo: str, loan_id: int):
+    if tipo == 'escolar':
+        table, id_column = 'Cuaderno_Diario', 'ID_Cuaderno'
+    elif tipo == 'domiciliario':
+        table, id_column = 'Ficha_Domiciliaria', 'ID_Ficha'
+    else:
+        raise HTTPException(status_code=400, detail='Tipo de préstamo inválido')
+
+    today = datetime.date.today()
+    with engine.begin() as conn:
+        loan = conn.execute(
+            text(f"SELECT ID_Libro, Cantidad, Estado FROM {table} WHERE {id_column} = :id FOR UPDATE"),
+            {'id': loan_id},
+        ).fetchone()
+        if not loan:
+            raise HTTPException(status_code=404, detail='Préstamo no encontrado')
+        if loan[2] != 'Activo':
+            raise HTTPException(status_code=409, detail='El préstamo ya fue devuelto')
+        updated = conn.execute(
+            text(
+                f"UPDATE {table} SET Estado = 'Devuelto', Fecha_Devolucion = :fecha "
+                f"WHERE {id_column} = :id AND Estado = 'Activo'"
+            ),
+            {'fecha': today, 'id': loan_id},
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail='El préstamo ya fue devuelto')
+        conn.execute(
+            text('UPDATE Libro SET Stock = Stock + :cantidad WHERE ID_Libro = :id'),
+            {'cantidad': loan[1], 'id': loan[0]},
+        )
+        librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
+        insert_log(
+            conn,
+            'Préstamo Devuelto',
+            librarian['ID_Usuario'],
+            loan[0],
+            f'{tipo.title()} #{loan_id} devuelto; se repusieron {loan[1]} ejemplar(es)',
+        )
+    return {'ok': True, 'ID_Prestamo': loan_id, 'Estado': 'Devuelto', 'Cantidad_Repuesta': loan[1]}
 
 
 @app.get('/api/history/bajas')
@@ -1134,12 +1516,6 @@ def get_history_bajas(request: Request, page: int = 1, limit: int = 20):
         return {'total': int(total), 'page': page, 'pages': pages, 'bajas': records}
 
 
-@app.delete('/api/history/reservas')
-@require_role('Bibliotecario')
-def delete_history_reservas(request: Request):
-    raise HTTPException(status_code=403, detail='El historial de reservas está protegido y no se puede vaciar')
-
-
 @app.delete('/api/history/bajas')
 @require_role('Bibliotecario')
 def delete_history_bajas(request: Request):
@@ -1152,7 +1528,7 @@ def login(data: LoginIn):
     with engine.begin() as conn:
         r = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, Curso, Division "
                 "FROM Usuario WHERE Gmail = :g AND Contraseña = :p"
             ),
             {'g': data.Gmail, 'p': data.Contraseña},
@@ -1163,7 +1539,15 @@ def login(data: LoginIn):
         state = 'no vetado' if r[3] == 'vetado' and r[6] else r[3]
         gmail = r[2]
         tipo = infer_user_type(gmail, r[4])
-        return {'ID_Usuario': r[0], 'Nombre_Completo': r[1], 'Gmail': r[2], 'Estado': state, 'Tipo': tipo}
+        return {
+            'ID_Usuario': r[0],
+            'Nombre_Completo': r[1],
+            'Gmail': r[2],
+            'Estado': state,
+            'Tipo': tipo,
+            'Curso': r[7],
+            'Division': r[8],
+        }
 
 
 @app.post('/api/signup')

@@ -2,17 +2,20 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 
-def ensure_no_pending_returns(conn, user_id: int) -> None:
-    pending_return = conn.execute(
+def ensure_no_active_loans(conn, user_id: int) -> None:
+    active_loan = conn.execute(
         text(
-            "SELECT 1 FROM Reserva_Ejemplares "
-            "WHERE ID_Usuario = :user_id AND Fecha_Expiracion_Reserva >= UTC_TIMESTAMP() "
+            "SELECT 1 FROM Cuaderno_Diario "
+            "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
+            "UNION ALL "
+            "SELECT 1 FROM Ficha_Domiciliaria "
+            "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
             "LIMIT 1"
         ),
         {'user_id': user_id},
     ).fetchone()
-    if pending_return:
+    if active_loan:
         raise HTTPException(
             status_code=409,
-            detail='No se puede eliminar el alumno porque tiene devoluciones pendientes',
+            detail='No se puede eliminar el alumno porque tiene préstamos activos pendientes de devolución',
         )

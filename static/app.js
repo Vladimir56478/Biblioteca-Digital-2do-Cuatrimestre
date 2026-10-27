@@ -1,7 +1,7 @@
 /*
   Lógica de la interfaz de la biblioteca digital.
   Controla el login, los permisos por rol, la búsqueda de libros,
-  la edición del catálogo, las reservas y la comunicación con la API del backend.
+  la edición del catálogo, los préstamos y la comunicación con la API del backend.
 */
 
 // Estado global de la app para conservar la sesión del usuario entre recargas de la página.
@@ -13,7 +13,7 @@ let authState = {
 }
 
 let currentEditBookStock = null
-let historyCurrentTab = 'reservas'
+let historyCurrentTab = 'bajas'
 let banTargetUserId = null
 
 // Recupera la sesión guardada en el navegador para volver a entrar a la app sin pedir login otra vez.
@@ -75,6 +75,8 @@ function updateUIBasedOnAuth() {
         isVisible = isUser
       } else if (requiredRole === 'Bibliotecario') {
         isVisible = normalizedRole === 'Bibliotecario'
+      } else if (requiredRole === 'borrower') {
+        isVisible = normalizedRole === 'Alumno' || normalizedRole === 'Profesor'
       } else {
         isVisible = normalizedRole === requiredRole
       }
@@ -102,13 +104,17 @@ function showView(viewName) {
       showView('account')
       return
     }
-    const adminViews = ['admin', 'edit', 'history', 'profiles']
+    const adminViews = ['admin', 'edit', 'history', 'profiles', 'loans']
     if (adminViews.includes(viewName) && authState.Tipo !== 'Bibliotecario') {
       console.warn('Acceso bloqueado: solo el bibliotecario puede entrar a esta vista')
       showView('home')
       return
     }
-    const views = ['account', 'home', 'reserve', 'admin', 'edit', 'history', 'profiles']
+    if (viewName === 'my-loans' && !['Alumno', 'Profesor'].includes(authState.Tipo)) {
+      showView('home')
+      return
+    }
+    const views = ['account', 'home', 'my-loans', 'loans', 'admin', 'edit', 'history', 'profiles']
     views.forEach(v => {
       const el = document.getElementById('view-' + v)
       if (el) el.style.display = 'none'
@@ -116,7 +122,13 @@ function showView(viewName) {
     const target = document.getElementById('view-' + viewName)
     if (target) target.style.display = 'block'
     if (viewName === 'home') {
+      loadProfile()
       doSearch()
+    }
+    if (viewName === 'my-loans') loadMyLoans()
+    if (viewName === 'loans') {
+      loadLoanFormOptions()
+      loadAdminLoans()
     }
     if (viewName === 'edit') {
       loadEditBooks()
@@ -164,7 +176,9 @@ async function loadEditBooks(query = '', page = 1) {
   if (!results) return
   editState.query = query
   try {
-    const res = await fetch('/api/search?title=' + encodeURIComponent(query) + '&page=' + page + '&limit=' + editState.limit)
+    const res = await fetch('/api/search?title=' + encodeURIComponent(query) + '&page=' + page + '&limit=' + editState.limit, {
+      headers: getAuthHeaders()
+    })
     const data = await res.json()
     results.innerHTML = ''
     if (!res.ok) {
@@ -249,7 +263,7 @@ function switchEditSubtab(tab) {
   })
 }
 
-// Construye una tabla dinámica para mostrar el historial de reservas y bajas con formato consistente.
+// Construye una tabla dinámica para mostrar historiales con formato consistente.
 async function renderHistoryTable(columns, rows, container, msg) {
   if (!container) return
   container.innerHTML = ''
@@ -289,29 +303,10 @@ async function renderHistoryTable(columns, rows, container, msg) {
 }
 
 function switchHistorySubtab(tab) {
-  historyCurrentTab = tab
-  document.querySelectorAll('.history-tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab)
-  })
-  const reservasEl = document.getElementById('history-reservas')
-  const devolucionesEl = document.getElementById('history-devoluciones')
+  historyCurrentTab = 'bajas'
   const bajasEl = document.getElementById('history-bajas')
-  if (tab === 'reservas') {
-    if (reservasEl) reservasEl.style.display = 'block'
-    if (devolucionesEl) devolucionesEl.style.display = 'none'
-    if (bajasEl) bajasEl.style.display = 'none'
-    loadHistoryReservas()
-  } else if (tab === 'devoluciones') {
-    if (reservasEl) reservasEl.style.display = 'none'
-    if (devolucionesEl) devolucionesEl.style.display = 'block'
-    if (bajasEl) bajasEl.style.display = 'none'
-    loadHistoryDevoluciones()
-  } else {
-    if (reservasEl) reservasEl.style.display = 'none'
-    if (devolucionesEl) devolucionesEl.style.display = 'none'
-    if (bajasEl) bajasEl.style.display = 'block'
-    loadHistoryBajas()
-  }
+  if (bajasEl) bajasEl.style.display = 'block'
+  loadHistoryBajas()
 }
 
 async function loadHistoryLogs() {
@@ -319,94 +314,7 @@ async function loadHistoryLogs() {
 }
 
 const historyState = {
-  reservas: { page: 1, limit: 10, pages: 1 },
-  devoluciones: { page: 1, limit: 10, pages: 1 },
   bajas: { page: 1, limit: 10, pages: 1 }
-}
-
-async function loadHistoryReservas(page = 1) {
-  const container = document.getElementById('history-reservas')
-  const pagination = document.getElementById('historyReservasPagination')
-  const msg = document.getElementById('historyMsg')
-  if (!container) return
-  if (msg) msg.textContent = ''
-
-  try {
-    const res = await fetch('/api/history/reservas?page=' + page + '&limit=' + historyState.reservas.limit, {
-      headers: getAuthHeaders()
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      if (msg) {
-        msg.textContent = 'Error cargando reservas: ' + (data.detail || 'Error')
-        msg.style.color = 'red'
-      }
-      return
-    }
-
-    const columns = [
-      { key: 'Codigo_reserva', label: 'Código' },
-      { key: 'Fecha_Reserva', label: 'Fecha reserva' },
-      { key: 'Fecha_Expiracion_Reserva', label: 'Fecha expiración' },
-      { key: 'Usuario', label: 'Usuario' },
-      { key: 'Libro', label: 'Libro' },
-      { key: 'Cantidad', label: 'Cantidad' }
-    ]
-    renderHistoryTable(columns, data.reservas || [], container, msg)
-    historyState.reservas.page = data.page
-    historyState.reservas.pages = data.pages
-    if (pagination) {
-      renderPagination(pagination, data.page, data.pages, newPage => loadHistoryReservas(newPage))
-    }
-  } catch (e) {
-    console.error('Error al cargar reservas:', e)
-    if (msg) {
-      msg.textContent = 'Error cargando reservas'
-      msg.style.color = 'red'
-    }
-  }
-}
-
-async function loadHistoryDevoluciones(page = 1) {
-  const container = document.getElementById('history-devoluciones')
-  const pagination = document.getElementById('historyDevolucionesPagination')
-  const msg = document.getElementById('historyMsg')
-  if (!container) return
-  if (msg) msg.textContent = ''
-
-  try {
-    const res = await fetch('/api/history/devoluciones-pendientes?page=' + page + '&limit=' + historyState.devoluciones.limit, {
-      headers: getAuthHeaders()
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      if (msg) {
-        msg.textContent = 'Error cargando devoluciones: ' + (data.detail || 'Error')
-        msg.style.color = 'red'
-      }
-      return
-    }
-
-    const columns = [
-      { key: 'Profesor', label: 'Profesor' },
-      { key: 'Libro', label: 'Libro' },
-      { key: 'Fecha_Limite', label: 'Fecha límite' },
-      { key: 'Cantidad', label: 'Cantidad' },
-      { key: 'Estado', label: 'Estado' }
-    ]
-    renderHistoryTable(columns, data.devoluciones || [], container, msg)
-    historyState.devoluciones.page = data.page
-    historyState.devoluciones.pages = data.pages
-    if (pagination) {
-      renderPagination(pagination, data.page, data.pages, newPage => loadHistoryDevoluciones(newPage))
-    }
-  } catch (e) {
-    console.error('Error al cargar devoluciones pendientes:', e)
-    if (msg) {
-      msg.textContent = 'Error cargando devoluciones pendientes'
-      msg.style.color = 'red'
-    }
-  }
 }
 
 async function loadHistoryBajas(page = 1) {
@@ -480,8 +388,7 @@ function renderPagination(container, page, pages, onPageClick) {
   container.appendChild(next)
 }
 
-// Esta función actualiza la vista de resultados y la paginación.
-// Consulta la API del catálogo y arma las tarjetas del buscador con stock y botón de reserva.
+// Consulta el catálogo y presenta únicamente los ejemplares disponibles.
 async function doSearch(page = 1) {
   const searchInput = document.getElementById('searchInput')
   if (!searchInput) return
@@ -491,40 +398,39 @@ async function doSearch(page = 1) {
   if (!container) return
   
   try {
-    const res = await fetch('/api/search?title=' + encodeURIComponent(q) + '&page=' + page + '&limit=' + searchState.limit)
+    const res = await fetch('/api/search?title=' + encodeURIComponent(q) + '&page=' + page + '&limit=' + searchState.limit, {
+      headers: getAuthHeaders()
+    })
     const data = await res.json()
     container.innerHTML = ''
     if (!res.ok) {
-      container.innerHTML = '<p>Error cargando catálogo.</p>'
+      container.textContent = data.detail || 'Error cargando catálogo.'
       return
     }
     if (!data.books || data.books.length === 0) {
       container.innerHTML = '<p>No se encontraron libros</p>'
-      pagination.innerHTML = ''
+      if (pagination) pagination.innerHTML = ''
       return
     }
     data.books.forEach(it => {
       const card = document.createElement('div')
       card.className = 'card'
-      card.innerHTML = `
-        <div class="thumb"></div>
-        <div style="flex:1">
-          <div style="font-weight:700; color:var(--accent); margin-bottom:4px;">${it.Titulo}</div>
-          <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
-          <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
-          <p style="margin:0; color:#0b5a52; font-weight:700;">Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}</p>
-          <button type="button" class="reserve-btn" data-id="${it.ID_Libro}" data-titulo="${it.Titulo}" ${it.Stock_Disponible <= 0 ? 'disabled' : ''} style="margin-top: 8px; background: #0b5a52; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">Reservar</button>
-        </div>
-      `
+      const details = document.createElement('div')
+      details.style.flex = '1'
+      const title = document.createElement('div')
+      title.className = 'book-title'
+      title.textContent = it.Titulo
+      const author = document.createElement('p')
+      author.textContent = `Autor: ${it.Autor || '--'}`
+      const publisher = document.createElement('p')
+      publisher.textContent = `Editorial: ${it.Editorial || '--'}`
+      const stock = document.createElement('p')
+      stock.className = 'book-stock'
+      stock.textContent = `Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}`
+      details.append(title, author, publisher, stock)
+      card.appendChild(document.createElement('div')).className = 'thumb'
+      card.appendChild(details)
       container.appendChild(card)
-    })
-    document.querySelectorAll('.reserve-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault()
-        const titulo = btn.getAttribute('data-titulo')
-        const bookId = Number(btn.getAttribute('data-id'))
-        preFillAndShowReserveForm(titulo, bookId)
-      })
     })
     searchState.page = data.page
     searchState.pages = data.pages
@@ -539,20 +445,269 @@ async function doSearch(page = 1) {
   }
 }
 
-function preFillAndShowReserveForm(titulo, bookId) {
-  const tituloInput = document.getElementById('reserveTitulo')
-  const bookIdInput = document.getElementById('reserveBookId')
-  if (tituloInput) {
-    tituloInput.value = titulo
-  }
-  if (bookIdInput) {
-    bookIdInput.value = bookId || ''
-  }
-  showView('reserve')
-}
-
 // Mantiene el estado de paginación de la tabla de usuarios para navegar entre páginas de perfiles.
 const profilesState = { page: 1, limit: 10, pages: 1 }
+let loanUsers = []
+let loanBooks = []
+
+function formatDateDisplay(value) {
+  if (!value) return '—'
+  const [year, month, day] = String(value).slice(0, 10).split('-')
+  return year && month && day ? `${day}/${month}/${year}` : value
+}
+
+async function loadProfile() {
+  const panel = document.getElementById('profilePanel')
+  const catalog = document.getElementById('catalogContent')
+  if (!panel || !catalog) return
+  if (authState.Tipo === 'Bibliotecario') {
+    panel.style.display = 'none'
+    catalog.style.display = 'block'
+    return
+  }
+  panel.style.display = 'block'
+  try {
+    const res = await fetch('/api/profile', { headers: getAuthHeaders() })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'No se pudo consultar el perfil')
+    const complete = data.complete === true
+    document.getElementById('profileCourse').value = data.Curso ? String(data.Curso) : ''
+    document.getElementById('profileDivision').value = data.Division ? String(data.Division) : ''
+    document.getElementById('profilePrompt').textContent = complete
+      ? 'Puedes actualizar estos datos cuando cambien.'
+      : 'Completa ambos datos antes de acceder al catálogo.'
+    catalog.style.display = complete ? 'block' : 'none'
+    authState.Curso = data.Curso
+    authState.Division = data.Division
+    saveAuthState()
+  } catch (error) {
+    catalog.style.display = 'none'
+    const msg = document.getElementById('profileMsg')
+    if (msg) {
+      msg.textContent = error.message
+      msg.style.color = 'red'
+    }
+  }
+}
+
+function setSelectOptions(select, options, placeholder) {
+  if (!select) return
+  select.replaceChildren()
+  const first = document.createElement('option')
+  first.value = ''
+  first.textContent = placeholder
+  select.appendChild(first)
+  options.forEach(item => {
+    const option = document.createElement('option')
+    option.value = String(item.value)
+    option.textContent = item.label
+    if (item.disabled) option.disabled = true
+    select.appendChild(option)
+  })
+}
+
+function populateSchoolResponsible() {
+  const mode = document.getElementById('schoolMode')?.value || 'Alumno'
+  const requiredRole = mode === 'Alumno' ? 'Alumno' : 'Profesor'
+  const users = loanUsers.filter(user => user.Tipo === requiredRole)
+  setSelectOptions(
+    document.getElementById('schoolResponsible'),
+    users.map(user => ({
+      value: user.ID_Usuario,
+      label: `${user.Nombre_Completo} · ${user.Tipo}${user.Curso && user.Division ? ` · ${user.Curso}.º ${user.Division}.ª` : ' · perfil pendiente'}`,
+    })),
+    'Selecciona responsable'
+  )
+  const retireWrap = document.getElementById('schoolRetireWrap')
+  if (retireWrap) retireWrap.style.display = mode === 'AlumnoPorProfesor' ? 'block' : 'none'
+  const retire = document.getElementById('schoolRetire')
+  setSelectOptions(
+    retire,
+    loanUsers.filter(user => user.Tipo === 'Alumno').map(user => ({
+      value: user.ID_Usuario,
+      label: user.Nombre_Completo,
+    })),
+    'Selecciona alumno'
+  )
+  document.getElementById('schoolCourse').value = ''
+  document.getElementById('schoolDivision').value = ''
+}
+
+async function loadLoanFormOptions() {
+  const msg = document.getElementById('adminLoansMsg')
+  try {
+    const [usersRes, booksRes] = await Promise.all([
+      fetch('/api/loan-users', { headers: getAuthHeaders() }),
+      fetch('/api/search?limit=1000', { headers: getAuthHeaders() }),
+    ])
+    const usersData = await usersRes.json()
+    const booksData = await booksRes.json()
+    if (!usersRes.ok) throw new Error(usersData.detail || 'No se pudieron cargar las cuentas')
+    if (!booksRes.ok) throw new Error(booksData.detail || 'No se pudo cargar el catálogo')
+    loanUsers = usersData
+    loanBooks = booksData.books || []
+    populateSchoolResponsible()
+    setSelectOptions(
+      document.getElementById('homeResponsible'),
+      loanUsers.filter(user => user.Tipo === 'Profesor').map(user => ({
+        value: user.ID_Usuario,
+        label: `${user.Nombre_Completo}${user.Curso && user.Division ? ` · ${user.Curso}.º ${user.Division}.ª` : ' · perfil pendiente'}`,
+      })),
+      'Selecciona profesor'
+    )
+    const books = loanBooks.map(book => ({
+      value: book.ID_Libro,
+      label: `${book.Titulo} · ${book.Autor || 'Autor desconocido'} · disponibles: ${book.Stock_Disponible}`,
+      disabled: Number(book.Stock_Disponible) <= 0,
+    }))
+    setSelectOptions(document.getElementById('schoolBook'), books, 'Selecciona un libro')
+    setSelectOptions(document.getElementById('homeBook'), books, 'Selecciona un libro')
+    setSelectOptions(
+      document.getElementById('adminLoanBook'),
+      loanBooks.map(book => ({ value: book.ID_Libro, label: book.Titulo })),
+      'Todos los libros'
+    )
+    if (msg) msg.textContent = ''
+  } catch (error) {
+    console.error('Error cargando opciones de préstamos:', error)
+    if (msg) {
+      msg.textContent = error.message
+      msg.style.color = 'red'
+    }
+  }
+}
+
+function makeLoanCard(loan, librarian) {
+  const card = document.createElement('article')
+  card.className = 'loan-card'
+  const heading = document.createElement('h3')
+  heading.textContent = `#${loan.ID_Prestamo} · ${loan.Tipo === 'escolar' ? 'Cuaderno Diario' : 'Ficha Domiciliaria'} · ${loan.Estado}`
+  card.appendChild(heading)
+  const details = [
+    `Libro: ${loan.Libro}${loan.Autor ? ` · ${loan.Autor}` : ''}`,
+    `Responsable: ${loan.Responsable}`,
+    `Cantidad: ${loan.Cantidad}`,
+    `Curso/división: ${loan.Curso}.º ${loan.Division}.ª`,
+    `Préstamo: ${formatDateDisplay(loan.Fecha_Prestamo)}`,
+    `Vencimiento: ${formatDateDisplay(loan.Fecha_Vencimiento)}`,
+    `Devolución: ${formatDateDisplay(loan.Fecha_Devolucion)}`,
+  ]
+  if (loan.Retirado_Por) details.push(`Retiró: ${loan.Retirado_Por} (por cuenta del profesor)`)
+  if (loan.Apellido || loan.Nombre_Ficha) details.push(`Ficha: ${loan.Apellido || ''} ${loan.Nombre_Ficha || ''} · DNI ${loan.DNI || '—'} · Tel. ${loan.Telefono || '—'} · ${loan.Dias} días`)
+  details.forEach(detail => {
+    const line = document.createElement('p')
+    line.textContent = detail
+    card.appendChild(line)
+  })
+  if (librarian && loan.Estado === 'Activo') {
+    const returnButton = document.createElement('button')
+    returnButton.type = 'button'
+    returnButton.textContent = 'Registrar devolución total'
+    returnButton.addEventListener('click', async () => {
+      if (!confirm(`¿Confirmas la devolución total del préstamo #${loan.ID_Prestamo}?`)) return
+      const response = await fetch(`/api/loans/${loan.Tipo}/${loan.ID_Prestamo}/return`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const result = await response.json()
+      const msg = document.getElementById('adminLoansMsg')
+      if (!response.ok) {
+        if (msg) {
+          msg.textContent = result.detail || 'No se pudo registrar la devolución'
+          msg.style.color = 'red'
+        }
+        return
+      }
+      if (msg) {
+        msg.textContent = `Préstamo #${loan.ID_Prestamo} devuelto; se repusieron ${result.Cantidad_Repuesta} ejemplar(es).`
+        msg.style.color = 'green'
+      }
+      await Promise.all([loadAdminLoans(), loadLoanFormOptions()])
+      doSearch()
+    })
+    card.appendChild(returnButton)
+  }
+  return card
+}
+
+const adminLoanState = { page: 1, limit: 10, status: 'Activo' }
+const myLoanState = { page: 1, limit: 10 }
+
+async function fetchAndRenderLoans(url, containerId, paginationId, msgId, page, limit, librarian, state) {
+  const container = document.getElementById(containerId)
+  const pagination = document.getElementById(paginationId)
+  const msg = document.getElementById(msgId)
+  if (!container) return
+  try {
+    const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}page=${page}&limit=${limit}`, {
+      headers: getAuthHeaders(),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.detail || 'No se pudieron cargar los préstamos')
+    container.replaceChildren()
+    if (!data.prestamos.length) {
+      container.textContent = 'No hay préstamos para mostrar.'
+    } else {
+      data.prestamos.forEach(loan => container.appendChild(makeLoanCard(loan, librarian)))
+    }
+    if (msg && msg.style.color !== 'green') msg.textContent = ''
+    state.page = data.page
+    if (pagination) {
+      renderPagination(pagination, data.page, data.pages, nextPage => {
+        if (librarian) loadAdminLoans(nextPage)
+        else loadMyLoans(nextPage)
+      })
+    }
+  } catch (error) {
+    console.error('Error consultando préstamos:', error)
+    container.textContent = ''
+    if (msg) {
+      msg.textContent = error.message
+      msg.style.color = 'red'
+    }
+  }
+}
+
+function loadAdminLoans(page = 1) {
+  const params = new URLSearchParams({
+    tipo: document.getElementById('adminLoanType')?.value || 'todos',
+    estado: adminLoanState.status,
+    persona: document.getElementById('adminLoanPerson')?.value.trim() || '',
+  })
+  const bookId = document.getElementById('adminLoanBook')?.value
+  const course = document.getElementById('adminLoanCourse')?.value
+  const division = document.getElementById('adminLoanDivision')?.value
+  if (bookId) params.set('libro_id', bookId)
+  if (course) params.set('curso', course)
+  if (division) params.set('division', division)
+  return fetchAndRenderLoans(
+    '/api/loans?' + params.toString(),
+    'adminLoansContainer',
+    'adminLoansPagination',
+    'adminLoansMsg',
+    page,
+    adminLoanState.limit,
+    true,
+    adminLoanState
+  )
+}
+
+function loadMyLoans(page = 1) {
+  const params = new URLSearchParams({
+    tipo: document.getElementById('myLoanType')?.value || 'todos',
+    estado: document.getElementById('myLoanState')?.value || 'todos',
+  })
+  return fetchAndRenderLoans(
+    '/api/my-loans?' + params.toString(),
+    'myLoansContainer',
+    'myLoansPagination',
+    'myLoansMsg',
+    page,
+    myLoanState.limit,
+    false,
+    myLoanState
+  )
+}
 
 function openBanDialog(user) {
   const dialog = document.getElementById('banDialog')
@@ -604,7 +759,7 @@ async function loadProfiles(page = 1) {
 
     const thead = document.createElement('thead')
     const headerRow = document.createElement('tr')
-    const headers = ['Nombre', 'Gmail', 'Tipo', 'Curso', 'Estado', 'Acciones']
+    const headers = ['Nombre', 'Gmail', 'Tipo', 'Curso / División', 'Estado', 'Acciones']
     headers.forEach(h => {
       const th = document.createElement('th')
       th.textContent = h
@@ -630,35 +785,9 @@ async function loadProfiles(page = 1) {
       row.appendChild(typeCell)
 
       const courseCell = document.createElement('td')
-      if (user.Tipo === 'Alumno') {
-        const courseControl = document.createElement('div')
-        courseControl.className = 'course-control'
-        const courseSelect = document.createElement('select')
-        courseSelect.setAttribute('aria-label', `Curso de ${user.Nombre_Completo}`)
-        const unassigned = document.createElement('option')
-        unassigned.value = ''
-        unassigned.textContent = 'Sin asignar'
-        courseSelect.appendChild(unassigned)
-        for (let course = 1; course <= 6; course += 1) {
-          const option = document.createElement('option')
-          option.value = String(course)
-          option.textContent = `${course}.º`
-          courseSelect.appendChild(option)
-        }
-        courseSelect.value = user.Curso ? String(user.Curso) : ''
-        const saveCourseBtn = document.createElement('button')
-        saveCourseBtn.type = 'button'
-        saveCourseBtn.textContent = 'Guardar'
-        saveCourseBtn.addEventListener('click', async () => {
-          if (await updateUserCourse(user.ID_Usuario, courseSelect.value ? Number(courseSelect.value) : null)) {
-            loadProfiles(page)
-          }
-        })
-        courseControl.append(courseSelect, saveCourseBtn)
-        courseCell.appendChild(courseControl)
-      } else {
-        courseCell.textContent = '—'
-      }
+      courseCell.textContent = user.Curso && user.Division
+        ? `${user.Curso}.º ${user.Division}.ª`
+        : 'Pendiente de completar'
       row.appendChild(courseCell)
 
       const stateCell = document.createElement('td')
@@ -719,38 +848,6 @@ async function loadProfiles(page = 1) {
       msg.textContent = 'Error cargando perfiles: ' + e.message
       msg.style.color = 'red'
     }
-  }
-}
-
-async function updateUserCourse(userId, course) {
-  const msg = document.getElementById('profilesMsg')
-  try {
-    const res = await fetch('/api/users/' + userId + '/course', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ Curso: course })
-    })
-    const data = await res.json()
-    if (res.ok) {
-      if (msg) {
-        msg.textContent = 'Curso actualizado correctamente'
-        msg.style.color = 'green'
-      }
-      return true
-    } else {
-      if (msg) {
-        msg.textContent = 'Error actualizando curso: ' + (data.detail || 'Error')
-        msg.style.color = 'red'
-      }
-      return false
-    }
-  } catch (e) {
-    console.error('Error actualizando curso:', e)
-    if (msg) {
-      msg.textContent = 'Error actualizando curso'
-      msg.style.color = 'red'
-    }
-    return false
   }
 }
 
@@ -880,6 +977,147 @@ function setupEventListeners() {
     })
   }
 
+  const profileForm = document.getElementById('profileForm')
+  if (profileForm) {
+    profileForm.addEventListener('submit', async event => {
+      event.preventDefault()
+      const payload = {
+        Curso: Number(document.getElementById('profileCourse').value),
+        Division: Number(document.getElementById('profileDivision').value),
+      }
+      const msg = document.getElementById('profileMsg')
+      try {
+        const response = await fetch('/api/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify(payload),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.detail || 'No se pudo guardar el perfil')
+        authState.Curso = result.Curso
+        authState.Division = result.Division
+        saveAuthState()
+        if (msg) {
+          msg.textContent = 'Curso y división guardados.'
+          msg.style.color = 'green'
+        }
+        await loadProfile()
+        doSearch()
+      } catch (error) {
+        if (msg) {
+          msg.textContent = error.message
+          msg.style.color = 'red'
+        }
+      }
+    })
+  }
+
+  const schoolMode = document.getElementById('schoolMode')
+  if (schoolMode) schoolMode.addEventListener('change', populateSchoolResponsible)
+  const schoolResponsible = document.getElementById('schoolResponsible')
+  if (schoolResponsible) {
+    schoolResponsible.addEventListener('change', () => {
+      const selected = loanUsers.find(user => String(user.ID_Usuario) === schoolResponsible.value)
+      document.getElementById('schoolCourse').value = selected?.Curso ? String(selected.Curso) : ''
+      document.getElementById('schoolDivision').value = selected?.Division ? String(selected.Division) : ''
+    })
+  }
+
+  const schoolLoanForm = document.getElementById('schoolLoanForm')
+  if (schoolLoanForm) {
+    schoolLoanForm.addEventListener('submit', async event => {
+      event.preventDefault()
+      const formData = Object.fromEntries(new FormData(schoolLoanForm).entries())
+      const payload = {
+        ...formData,
+        ID_Libro: Number(formData.ID_Libro),
+        ID_Responsable: Number(formData.ID_Responsable),
+        ID_Retira: formData.ID_Retira ? Number(formData.ID_Retira) : null,
+        Cantidad: Number(formData.Cantidad),
+        Curso: Number(formData.Curso),
+        Division: Number(formData.Division),
+      }
+      const msg = document.getElementById('schoolLoanMsg')
+      try {
+        const response = await fetch('/api/loans/school', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify(payload),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.detail || 'No se pudo registrar el préstamo')
+        if (msg) {
+          msg.textContent = `Cuaderno Diario #${result.ID_Prestamo} registrado. Vence ${formatDateDisplay(result.Fecha_Vencimiento)}.`
+          msg.style.color = 'green'
+        }
+        schoolLoanForm.reset()
+        populateSchoolResponsible()
+        await Promise.all([loadAdminLoans(), loadLoanFormOptions()])
+        doSearch()
+      } catch (error) {
+        if (msg) {
+          msg.textContent = error.message
+          msg.style.color = 'red'
+        }
+      }
+    })
+  }
+
+  const homeLoanForm = document.getElementById('homeLoanForm')
+  if (homeLoanForm) {
+    homeLoanForm.addEventListener('submit', async event => {
+      event.preventDefault()
+      const formData = Object.fromEntries(new FormData(homeLoanForm).entries())
+      const payload = {
+        ...formData,
+        ID_Libro: Number(formData.ID_Libro),
+        ID_Responsable: Number(formData.ID_Responsable),
+        Cantidad: Number(formData.Cantidad),
+        Dias: Number(formData.Dias),
+      }
+      const msg = document.getElementById('homeLoanMsg')
+      try {
+        const response = await fetch('/api/loans/home', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify(payload),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.detail || 'No se pudo registrar el préstamo')
+        if (msg) {
+          msg.textContent = `Ficha Domiciliaria #${result.ID_Prestamo} registrada. Vence ${formatDateDisplay(result.Fecha_Vencimiento)}.`
+          msg.style.color = 'green'
+        }
+        homeLoanForm.reset()
+        await Promise.all([loadAdminLoans(), loadLoanFormOptions()])
+        doSearch()
+      } catch (error) {
+        if (msg) {
+          msg.textContent = error.message
+          msg.style.color = 'red'
+        }
+      }
+    })
+  }
+
+  document.querySelectorAll('.loan-tab-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const school = button.getAttribute('data-tab') === 'school'
+      document.getElementById('schoolLoanPanel').style.display = school ? 'block' : 'none'
+      document.getElementById('homeLoanPanel').style.display = school ? 'none' : 'block'
+      document.querySelectorAll('.loan-tab-btn').forEach(tab => tab.classList.toggle('active', tab === button))
+    })
+    document.querySelectorAll('.loan-state-tab-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        adminLoanState.status = button.getAttribute('data-state')
+        document.querySelectorAll('.loan-state-tab-btn').forEach(tab => tab.classList.toggle('active', tab === button))
+        loadAdminLoans(1)
+      })
+    })
+  })
+  document.getElementById('adminLoansFilter')?.addEventListener('click', () => loadAdminLoans(1))
+  document.getElementById('myLoansRefresh')?.addEventListener('click', () => loadMyLoans(1))
+
   // Inicio de sesión
   const loginForm = document.getElementById('loginForm')
   if (loginForm) {
@@ -898,6 +1136,8 @@ function setupEventListeners() {
         authState.ID_Usuario = j.ID_Usuario
         authState.Nombre_Completo = j.Nombre_Completo
         authState.Tipo = j.Tipo
+        authState.Curso = j.Curso
+        authState.Division = j.Division
         saveAuthState()
         updateUIBasedOnAuth()
         if (msg) msg.textContent = ''
@@ -930,6 +1170,8 @@ function setupEventListeners() {
         authState.ID_Usuario = j.ID_Usuario
         authState.Nombre_Completo = j.Nombre_Completo
         authState.Tipo = j.Tipo
+        authState.Curso = j.Curso || null
+        authState.Division = j.Division || null
         saveAuthState()
         updateUIBasedOnAuth()
         if (msg) {
@@ -997,86 +1239,6 @@ function setupEventListeners() {
         }
       }
       e.target.reset()
-    })
-  }
-
-  // Formulario de reserva
-  const reserveForm = document.getElementById('reserveForm')
-  if (reserveForm) {
-    reserveForm.addEventListener('submit', async (e) => {
-      e.preventDefault()
-      const formData = Object.fromEntries(new FormData(e.target).entries())
-      // Si no se proporcionó ID_Libro, intentar resolver por título (insensible a mayúsculas)
-      let libroId = Number(formData.ID_Libro)
-      const tituloIngresado = (formData.Titulo || '').trim()
-      if ((!libroId || libroId === 0) && tituloIngresado) {
-        try {
-          const sres = await fetch('/api/search?title=' + encodeURIComponent(tituloIngresado) + '&limit=10')
-          const sdata = await sres.json()
-          if (sres.ok && Array.isArray(sdata.books) && sdata.books.length > 0) {
-            const titleLower = tituloIngresado.toLowerCase()
-            // Preferir coincidencia exacta ignorando mayúsculas
-            const exact = sdata.books.find(b => (b.Titulo || '').toLowerCase() === titleLower)
-            if (exact) {
-              libroId = exact.ID_Libro
-            } else if (sdata.books.length === 1) {
-              // Si solo hay un resultado, usarlo
-              libroId = sdata.books[0].ID_Libro
-            }
-          }
-        } catch (err) {
-          console.error('Error buscando libro por título antes de reservar:', err)
-        }
-      }
-
-      const data = {
-        ID_Libro: Number(libroId),
-        ID_Usuario: authState.ID_Usuario,
-        Cantidad: Number(formData.Cantidad)
-      }
-      const msg = document.getElementById('reserveMsg')
-      if (!data.ID_Libro) {
-        if (msg) {
-          msg.textContent = 'Error: Debes seleccionar un libro desde el catálogo antes de reservar.'
-          msg.style.color = 'red'
-        }
-        return
-      }
-      const res = await fetch('/api/reserve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify(data)
-      })
-      const j = await res.json()
-      if (res.ok) {
-        if (msg) {
-          msg.textContent = 'Reserva: ' + j.Codigo_reserva
-          msg.style.color = 'green'
-        }
-        e.target.reset()
-      } else {
-        if (msg) {
-          const detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-          msg.textContent = 'Error: ' + (detail || 'Error')
-          msg.style.color = 'red'
-        }
-      }
-    })
-  }
-
-  // Botón para limpiar título pre-rellenado
-  const clearTituloBtn = document.getElementById('clearTituloBtn')
-  if (clearTituloBtn) {
-    clearTituloBtn.addEventListener('click', () => {
-      const tituloInput = document.getElementById('reserveTitulo')
-      const bookIdInput = document.getElementById('reserveBookId')
-      if (tituloInput) {
-        tituloInput.value = ''
-        tituloInput.focus()
-      }
-      if (bookIdInput) {
-        bookIdInput.value = ''
-      }
     })
   }
 
