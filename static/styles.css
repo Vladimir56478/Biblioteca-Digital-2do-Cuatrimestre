@@ -535,6 +535,14 @@ button[type="submit"]:hover,
   background: #fff;
 }
 
+.history-table.profiles-table {
+  min-width: 1040px;
+}
+
+.profile-classification-select {
+  min-width: 135px;
+}
+
 .history-table th,
 .history-table td {
   padding: 12px 14px;

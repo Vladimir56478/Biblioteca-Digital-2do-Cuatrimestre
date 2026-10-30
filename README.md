@@ -41,9 +41,11 @@ aplicación. No se crea una base separada automáticamente.
 
 Abre <http://localhost:8000/>.
 
-En cada inicio el backend aplica cambios idempotentes: agrega `Usuario.Curso` y
-`Usuario.Division` si faltan, crea `Cuaderno_Diario`, `Ficha_Domiciliaria` y sus
-índices/relaciones, y registra la migración aplicada en `Schema_Migration`.
+En cada inicio el backend aplica cambios idempotentes: agrega campos de curso,
+división, veto, clasificación de egresado y actividad de cuenta si faltan,
+crea `Cuaderno_Diario`, `Ficha_Domiciliaria` y sus índices/relaciones, y
+registra las migraciones aplicadas en `Schema_Migration`. Las cuentas existentes
+se inicializan activas y como no egresadas.
 La migración `remove_legacy_reservations_v1` vacía una sola vez los registros de
 prueba de `Reserva_Ejemplares` y devuelve su cantidad a `Libro.Stock` disponible
 sin tocar `Stock_Total`. No elimina esa tabla ni borra usuarios, libros, autores,
@@ -73,8 +75,13 @@ esquema.
   pero no editarlos.
 - Las bajas de stock y los préstamos/devoluciones se registran en el historial.
   Los libros con movimientos o historial de préstamos no se pueden eliminar.
-  Los préstamos activos bloquean la eliminación de un alumno egresado; las
-  filas históricas de préstamos se conservan.
+- En Perfiles, el bibliotecario puede clasificar como egresado o no egresado a
+  los alumnos de 6.º curso. Un egresado se puede inactivar y reactivar sin
+  eliminar su cuenta, préstamos ni historial. La inactivación requiere registrar
+  primero las devoluciones pendientes, tanto si el alumno era responsable como
+  si retiró el préstamo (`ID_Retira`). Las cuentas inactivas no pueden iniciar
+  sesión ni recibir préstamos nuevos. El veto es independiente de la actividad
+  y se conserva al inactivar/reactivar.
 - No existe alta de préstamo mediante el antiguo endpoint de reservas.
 
 Las fechas de préstamo/vencimiento/devolución se almacenan como `DATE` y se

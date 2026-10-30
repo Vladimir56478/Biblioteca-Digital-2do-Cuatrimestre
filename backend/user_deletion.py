@@ -8,6 +8,9 @@ def ensure_no_active_loans(conn, user_id: int) -> None:
             "SELECT 1 FROM Cuaderno_Diario "
             "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
             "UNION ALL "
+            "SELECT 1 FROM Cuaderno_Diario "
+            "WHERE ID_Retira = :user_id AND Estado = 'Activo' "
+            "UNION ALL "
             "SELECT 1 FROM Ficha_Domiciliaria "
             "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
             "LIMIT 1"
@@ -17,5 +20,5 @@ def ensure_no_active_loans(conn, user_id: int) -> None:
     if active_loan:
         raise HTTPException(
             status_code=409,
-            detail='No se puede eliminar el alumno porque tiene préstamos activos pendientes de devolución',
+            detail='No se puede inactivar al alumno porque tiene préstamos activos pendientes de devolución',
         )

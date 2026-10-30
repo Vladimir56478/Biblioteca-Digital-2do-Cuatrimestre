@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from backend.db import get_engine
 from backend.user_deletion import ensure_no_active_loans
@@ -351,6 +350,62 @@ def ensure_loan_schema():
 ensure_loan_schema()
 
 
+def ensure_graduated_account_fields():
+    with engine.begin() as conn:
+        existing_columns = {
+            row[0].lower(): (row[1], row[2])
+            for row in conn.execute(
+                text(
+                    "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT "
+                    "FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Usuario'"
+                )
+            ).fetchall()
+        }
+        account_columns = {
+            'Es_Egresado': (
+                "ALTER TABLE Usuario ADD COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE Usuario MODIFY COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
+                '0',
+            ),
+            'Cuenta_Activa': (
+                "ALTER TABLE Usuario ADD COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE Usuario MODIFY COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
+                '1',
+            ),
+        }
+        for column, (add_statement, modify_statement, default) in account_columns.items():
+            column_state = existing_columns.get(column.lower())
+            if column_state is None:
+                conn.execute(text(add_statement))
+            else:
+                nullable, current_default = column_state
+                if nullable == 'YES':
+                    conn.execute(
+                        text(f"UPDATE Usuario SET {column} = :default WHERE {column} IS NULL"),
+                        {'default': int(default)},
+                    )
+                if nullable == 'YES' or str(current_default) != default:
+                    conn.execute(text(modify_statement))
+
+        migration_key = 'graduated_account_state_v1'
+        migration_applied = conn.execute(
+            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = :key"),
+            {'key': migration_key},
+        ).fetchone()
+        if not migration_applied:
+            conn.execute(
+                text(
+                    "INSERT INTO Schema_Migration (Migration_Key, Applied_At) "
+                    "VALUES (:key, CURRENT_TIMESTAMP)"
+                ),
+                {'key': migration_key},
+            )
+
+
+ensure_graduated_account_fields()
+
+
 class BookIn(BaseModel):
     Titulo: str = Field(..., max_length=100)
     Editorial: str | None = None
@@ -403,6 +458,14 @@ class UserStateUpdate(BaseModel):
     Estado: str = Field(..., max_length=30)
     Motivo: str | None = Field(None, max_length=255)
     Duracion_Dias: int | None = Field(None, ge=1, le=365)
+
+
+class GraduatedStatusUpdate(BaseModel):
+    Es_Egresado: bool
+
+
+class AccountActivationUpdate(BaseModel):
+    Cuenta_Activa: bool
 
 
 class UserProfileUpdate(BaseModel):
@@ -475,6 +538,11 @@ def ensure_user_not_banned(conn, row):
     raise HTTPException(status_code=403, detail=detail)
 
 
+def ensure_user_active(row):
+    if not row[9]:
+        raise HTTPException(status_code=403, detail='La cuenta está inactiva')
+
+
 def get_authenticated_user(
     request: Request,
     allowed_roles: list[str] | None = None,
@@ -498,13 +566,15 @@ def get_authenticated_user(
     with engine.begin() as conn:
         row = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, Curso, Division "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
+                "Curso, Division, Cuenta_Activa "
                 "FROM Usuario WHERE ID_Usuario = :id"
             ),
             {'id': user_id},
         ).fetchone()
         if not row:
             raise HTTPException(status_code=401, detail='Usuario no encontrado')
+        ensure_user_active(row)
         ensure_user_not_banned(conn, row)
 
     # Normaliza el tipo de usuario según el correo y los datos guardados.
@@ -529,6 +599,7 @@ def get_authenticated_user(
         'Tipo': actual_type,
         'Curso': row[7],
         'Division': row[8],
+        'Cuenta_Activa': bool(row[9]),
     }
     request.state.user = user
     return user
@@ -623,13 +694,17 @@ def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
 
 @app.middleware('http')
 async def enforce_role_middleware(request: Request, call_next):
-    if request.url.path in PROTECTED_ROUTE_ROLES:
+    user_id, _ = get_request_identity(request)
+    if user_id and request.url.path.startswith('/api/') and request.url.path not in ('/api/login', '/api/signup'):
         try:
-            get_authenticated_user(
-                request,
-                allowed_roles=list(PROTECTED_ROUTE_ROLES[request.url.path]),
-                require_admin_email=(request.url.path == '/api/books'),
-            )
+            if request.url.path in PROTECTED_ROUTE_ROLES:
+                get_authenticated_user(
+                    request,
+                    allowed_roles=list(PROTECTED_ROUTE_ROLES[request.url.path]),
+                    require_admin_email=(request.url.path == '/api/books'),
+                )
+            else:
+                get_authenticated_user(request)
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={'detail': exc.detail})
     return await call_next(request)
@@ -857,13 +932,15 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
 
         if len(allowed_roles) == 1:
             stmt = text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, Motivo_Veto, Veto_Hasta "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, "
+                "Motivo_Veto, Veto_Hasta, Es_Egresado, Cuenta_Activa "
                 "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo': allowed_roles[0], 'limit': limit, 'offset': offset}).fetchall()
         else:
             stmt = text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, Motivo_Veto, Veto_Hasta "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, "
+                "Motivo_Veto, Veto_Hasta, Es_Egresado, Cuenta_Activa "
                 "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1], 'limit': limit, 'offset': offset}).fetchall()
@@ -880,6 +957,8 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
             'Division': row[6],
             'Motivo_Veto': row[7],
             'Veto_Hasta': format_datetime(row[8]),
+            'Es_Egresado': bool(row[9]),
+            'Cuenta_Activa': bool(row[10]),
         })
     return {'total': int(total), 'page': page, 'pages': pages, 'users': users}
 
@@ -903,13 +982,15 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 
     with engine.begin() as conn:
         target = conn.execute(
-            text('SELECT Tipo FROM Usuario WHERE ID_Usuario = :id'),
+            text('SELECT Tipo, Es_Egresado FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
             {'id': user_id}
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail='Usuario no encontrado')
         if target[0] == 'Bibliotecario':
             raise HTTPException(status_code=403, detail='No se puede vetar al bibliotecario')
+        if new_state == 'vetado' and target[1]:
+            raise HTTPException(status_code=409, detail='No se puede aplicar un veto nuevo a un egresado')
 
         result = conn.execute(
             text(
@@ -927,6 +1008,56 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
         'Estado': new_state,
         'Motivo_Veto': ban_reason,
         'Veto_Hasta': format_datetime(ban_until),
+    }
+
+
+@app.put('/api/users/{user_id}/graduated-status')
+@require_role('Bibliotecario')
+def update_graduated_status(request: Request, user_id: int, data: GraduatedStatusUpdate):
+    with engine.begin() as conn:
+        target = conn.execute(
+            text('SELECT Tipo, Curso FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
+            {'id': user_id},
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail='Usuario no encontrado')
+        if target[0] != 'Alumno' or target[1] != 6:
+            raise HTTPException(
+                status_code=409,
+                detail='La clasificación solo se puede cambiar para alumnos de 6.º curso',
+            )
+        conn.execute(
+            text('UPDATE Usuario SET Es_Egresado = :egresado WHERE ID_Usuario = :id'),
+            {'egresado': data.Es_Egresado, 'id': user_id},
+        )
+    return {'ok': True, 'ID_Usuario': user_id, 'Es_Egresado': data.Es_Egresado}
+
+
+@app.put('/api/users/{user_id}/activation')
+@require_role('Bibliotecario')
+def update_account_activation(request: Request, user_id: int, data: AccountActivationUpdate):
+    with engine.begin() as conn:
+        target = conn.execute(
+            text(
+                'SELECT Tipo, Es_Egresado, Cuenta_Activa '
+                'FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'
+            ),
+            {'id': user_id},
+        ).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail='Usuario no encontrado')
+        if target[0] != 'Alumno' or not target[1]:
+            raise HTTPException(status_code=409, detail='Solo se puede inactivar o reactivar a un alumno egresado')
+        if not data.Cuenta_Activa:
+            ensure_no_active_loans(conn, user_id)
+        conn.execute(
+            text('UPDATE Usuario SET Cuenta_Activa = :active WHERE ID_Usuario = :id'),
+            {'active': data.Cuenta_Activa, 'id': user_id},
+        )
+    return {
+        'ok': True,
+        'ID_Usuario': user_id,
+        'Cuenta_Activa': data.Cuenta_Activa,
     }
 
 
@@ -954,38 +1085,6 @@ def update_profile(request: Request, data: UserProfileUpdate):
     user['Curso'] = data.Curso
     user['Division'] = data.Division
     return {'ok': True, 'Curso': data.Curso, 'Division': data.Division}
-
-
-@app.delete('/api/users/{user_id}')
-@require_role('Bibliotecario')
-def delete_graduated_student(request: Request, user_id: int):
-    with engine.begin() as conn:
-        target = conn.execute(
-            text('SELECT Tipo, Curso FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
-            {'id': user_id},
-        ).fetchone()
-        if not target:
-            raise HTTPException(status_code=404, detail='Usuario no encontrado')
-        if target[0] != 'Alumno' or target[1] != 6:
-            raise HTTPException(
-                status_code=409,
-                detail='Solo se pueden eliminar alumnos de 6.º curso',
-            )
-
-        ensure_no_active_loans(conn, user_id)
-
-        conn.execute(
-            text('UPDATE Log_Sistema SET ID_Usuario = NULL WHERE ID_Usuario = :id'),
-            {'id': user_id},
-        )
-        try:
-            conn.execute(text('DELETE FROM Usuario WHERE ID_Usuario = :id'), {'id': user_id})
-        except IntegrityError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail='No se puede eliminar el alumno porque otros registros dependen de su cuenta',
-            ) from exc
-    return {'ok': True, 'deleted': user_id}
 
 
 @app.get('/api/search')
@@ -1183,7 +1282,8 @@ def list_loan_users(request: Request):
         rows = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Curso, Division "
-                "FROM Usuario WHERE Tipo IN ('Alumno', 'Profesor') ORDER BY Tipo, Nombre_Completo"
+                "FROM Usuario WHERE Tipo IN ('Alumno', 'Profesor') AND Cuenta_Activa = 1 "
+                "ORDER BY Tipo, Nombre_Completo"
             )
         ).fetchall()
     return [
@@ -1246,7 +1346,7 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
     with engine.begin() as conn:
         responsible = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division "
+                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division, Cuenta_Activa "
                 "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
             ),
             {'id': data.ID_Responsable},
@@ -1256,6 +1356,8 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
         expected_role = 'Alumno' if modalidad == 'Alumno' else 'Profesor'
         if responsible[2] != expected_role:
             raise HTTPException(status_code=400, detail=f'La cuenta responsable debe ser de tipo {expected_role}')
+        if not responsible[6]:
+            raise HTTPException(status_code=403, detail='La cuenta responsable está inactiva')
         if responsible[3] == 'vetado':
             raise HTTPException(status_code=403, detail='La cuenta responsable está vetada')
         if responsible[4] is None or responsible[5] is None:
@@ -1264,13 +1366,18 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
         retira = None
         if data.ID_Retira is not None:
             retira = conn.execute(
-                text("SELECT ID_Usuario, Nombre_Completo, Tipo FROM Usuario WHERE ID_Usuario = :id"),
+                text(
+                    "SELECT ID_Usuario, Nombre_Completo, Tipo, Cuenta_Activa "
+                    "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
+                ),
                 {'id': data.ID_Retira},
             ).fetchone()
             if not retira:
                 raise HTTPException(status_code=404, detail='Cuenta del alumno que retira no encontrada')
             if retira[2] != 'Alumno':
                 raise HTTPException(status_code=400, detail='Solo un alumno puede retirar por indicación docente')
+            if not retira[3]:
+                raise HTTPException(status_code=403, detail='La cuenta del alumno que retira está inactiva')
 
         active_school = conn.execute(
             text(
@@ -1355,7 +1462,7 @@ def create_home_loan(request: Request, data: HomeLoanIn):
     with engine.begin() as conn:
         responsible = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division "
+                "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division, Cuenta_Activa "
                 "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
             ),
             {'id': data.ID_Responsable},
@@ -1364,6 +1471,8 @@ def create_home_loan(request: Request, data: HomeLoanIn):
             raise HTTPException(status_code=404, detail='Cuenta responsable no encontrada')
         if responsible[2] != 'Profesor':
             raise HTTPException(status_code=400, detail='El préstamo domiciliario solo puede asignarse a un profesor')
+        if not responsible[6]:
+            raise HTTPException(status_code=403, detail='La cuenta responsable está inactiva')
         if responsible[3] == 'vetado':
             raise HTTPException(status_code=403, detail='La cuenta responsable está vetada')
         if responsible[4] is None or responsible[5] is None:
@@ -1528,13 +1637,15 @@ def login(data: LoginIn):
     with engine.begin() as conn:
         r = conn.execute(
             text(
-                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, Curso, Division "
+                "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
+                "Curso, Division, Cuenta_Activa, Es_Egresado "
                 "FROM Usuario WHERE Gmail = :g AND Contraseña = :p"
             ),
             {'g': data.Gmail, 'p': data.Contraseña},
         ).fetchone()
         if not r:
             raise HTTPException(status_code=401, detail='Credenciales inválidas')
+        ensure_user_active(r)
         ensure_user_not_banned(conn, r)
         state = 'no vetado' if r[3] == 'vetado' and r[6] else r[3]
         gmail = r[2]
@@ -1547,6 +1658,8 @@ def login(data: LoginIn):
             'Tipo': tipo,
             'Curso': r[7],
             'Division': r[8],
+            'Cuenta_Activa': bool(r[9]),
+            'Es_Egresado': bool(r[10]),
         }
 
 

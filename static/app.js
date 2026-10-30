@@ -726,12 +726,12 @@ function openBanDialog(user) {
   dialog.showModal()
 }
 
-async function loadProfiles(page = 1) {
+async function loadProfiles(page = 1, preserveMessage = false) {
   const container = document.getElementById('profilesContainer')
   const pagination = document.getElementById('profilesPagination')
   const msg = document.getElementById('profilesMsg')
   if (!container) return
-  if (msg) msg.textContent = ''
+  if (msg && !preserveMessage) msg.textContent = ''
 
   try {
     const res = await fetch('/api/users?role=all&page=' + page + '&limit=' + profilesState.limit, {
@@ -754,12 +754,12 @@ async function loadProfiles(page = 1) {
     }
 
     const table = document.createElement('table')
-    table.className = 'history-table'
+    table.className = 'history-table profiles-table'
     table.style.width = '100%'
 
     const thead = document.createElement('thead')
     const headerRow = document.createElement('tr')
-    const headers = ['Nombre', 'Gmail', 'Tipo', 'Curso / División', 'Estado', 'Acciones']
+    const headers = ['Nombre', 'Gmail', 'Tipo', 'Curso / División', 'Clasificación', 'Actividad', 'Veto', 'Acciones']
     headers.forEach(h => {
       const th = document.createElement('th')
       th.textContent = h
@@ -771,7 +771,7 @@ async function loadProfiles(page = 1) {
     const tbody = document.createElement('tbody')
     data.users.forEach(user => {
       const row = document.createElement('tr')
-      
+
       const nameCell = document.createElement('td')
       nameCell.textContent = user.Nombre_Completo || '-'
       row.appendChild(nameCell)
@@ -789,6 +789,30 @@ async function loadProfiles(page = 1) {
         ? `${user.Curso}.º ${user.Division}.ª`
         : 'Pendiente de completar'
       row.appendChild(courseCell)
+
+      const classificationCell = document.createElement('td')
+      if (user.Tipo === 'Alumno' && Number(user.Curso) === 6) {
+        const classification = document.createElement('select')
+        classification.className = 'profile-classification-select'
+        classification.setAttribute('aria-label', `Clasificación de ${user.Nombre_Completo}`)
+        classification.innerHTML = '<option value="false">No egresado</option><option value="true">Egresado</option>'
+        classification.value = user.Es_Egresado ? 'true' : 'false'
+        classification.addEventListener('change', async () => {
+          classification.disabled = true
+          await updateGraduatedStatus(user.ID_Usuario, classification.value === 'true')
+          await loadProfiles(page, true)
+        })
+        classificationCell.appendChild(classification)
+      } else if (user.Tipo === 'Alumno') {
+        classificationCell.textContent = user.Es_Egresado ? 'Egresado' : 'No egresado'
+      } else {
+        classificationCell.textContent = '-'
+      }
+      row.appendChild(classificationCell)
+
+      const activityCell = document.createElement('td')
+      activityCell.textContent = user.Cuenta_Activa ? 'Activa' : 'Inactiva'
+      row.appendChild(activityCell)
 
       const stateCell = document.createElement('td')
       stateCell.textContent = user.Estado || 'no vetado'
@@ -809,26 +833,33 @@ async function loadProfiles(page = 1) {
         unbanBtn.type = 'button'
         unbanBtn.textContent = 'Desvetar'
         unbanBtn.addEventListener('click', async () => {
-          if (await unbanUser(user.ID_Usuario)) loadProfiles(page)
+          if (await unbanUser(user.ID_Usuario)) loadProfiles(page, true)
         })
         actions.appendChild(unbanBtn)
       }
-      const banBtn = document.createElement('button')
-      banBtn.type = 'button'
-      banBtn.textContent = user.Estado === 'vetado' ? 'Editar veto' : 'Vetar'
-      banBtn.addEventListener('click', () => openBanDialog(user))
-      actions.appendChild(banBtn)
+      if (!user.Es_Egresado) {
+        const banBtn = document.createElement('button')
+        banBtn.type = 'button'
+        banBtn.textContent = user.Estado === 'vetado' ? 'Editar veto' : 'Vetar'
+        banBtn.addEventListener('click', () => openBanDialog(user))
+        actions.appendChild(banBtn)
+      }
 
-      if (user.Tipo === 'Alumno' && Number(user.Curso) === 6) {
-        const deleteBtn = document.createElement('button')
-        deleteBtn.type = 'button'
-        deleteBtn.className = 'danger-button'
-        deleteBtn.textContent = 'Eliminar egresado'
-        deleteBtn.addEventListener('click', async () => {
-          if (!confirm(`¿Eliminar definitivamente el perfil de ${user.Nombre_Completo}?`)) return
-          await deleteGraduatedStudent(user.ID_Usuario, page)
+      if (user.Tipo === 'Alumno' && user.Es_Egresado) {
+        const activationBtn = document.createElement('button')
+        activationBtn.type = 'button'
+        activationBtn.className = user.Cuenta_Activa ? 'danger-button' : ''
+        activationBtn.textContent = user.Cuenta_Activa ? 'Inactivar egresado' : 'Reactivar cuenta'
+        activationBtn.addEventListener('click', async () => {
+          const nextActiveState = !user.Cuenta_Activa
+          const confirmation = nextActiveState
+            ? `¿Reactivar la cuenta de ${user.Nombre_Completo}?`
+            : `¿Inactivar la cuenta de ${user.Nombre_Completo}? La cuenta y su historial se conservarán. Primero deben registrarse todas las devoluciones pendientes.`
+          if (!confirm(confirmation)) return
+          await updateAccountActivation(user.ID_Usuario, nextActiveState)
+          await loadProfiles(page, true)
         })
-        actions.appendChild(deleteBtn)
+        actions.appendChild(activationBtn)
       }
       actionCell.appendChild(actions)
       row.appendChild(actionCell)
@@ -848,6 +879,56 @@ async function loadProfiles(page = 1) {
       msg.textContent = 'Error cargando perfiles: ' + e.message
       msg.style.color = 'red'
     }
+  }
+}
+
+async function updateGraduatedStatus(userId, isGraduated) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId + '/graduated-status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ Es_Egresado: isGraduated })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Error')
+    if (msg) {
+      msg.textContent = 'Clasificación actualizada correctamente'
+      msg.style.color = 'green'
+    }
+    return true
+  } catch (error) {
+    console.error('Error actualizando clasificación:', error)
+    if (msg) {
+      msg.textContent = 'No se pudo actualizar la clasificación: ' + error.message
+      msg.style.color = 'red'
+    }
+    return false
+  }
+}
+
+async function updateAccountActivation(userId, isActive) {
+  const msg = document.getElementById('profilesMsg')
+  try {
+    const res = await fetch('/api/users/' + userId + '/activation', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ Cuenta_Activa: isActive })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Error')
+    if (msg) {
+      msg.textContent = isActive ? 'Cuenta reactivada correctamente' : 'Cuenta inactivada correctamente'
+      msg.style.color = 'green'
+    }
+    return true
+  } catch (error) {
+    console.error('Error actualizando actividad de la cuenta:', error)
+    if (msg) {
+      msg.textContent = 'No se pudo actualizar la cuenta: ' + error.message
+      msg.style.color = 'red'
+    }
+    return false
   }
 }
 
@@ -914,35 +995,6 @@ async function unbanUser(userId) {
   }
 }
 
-async function deleteGraduatedStudent(userId, page) {
-  const msg = document.getElementById('profilesMsg')
-  try {
-    const res = await fetch('/api/users/' + userId, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      if (msg) {
-        msg.textContent = 'No se pudo eliminar el alumno: ' + (data.detail || 'Error')
-        msg.style.color = 'red'
-      }
-      return
-    }
-    if (msg) {
-      msg.textContent = 'Perfil de egresado eliminado; el historial se conservó.'
-      msg.style.color = 'green'
-    }
-    loadProfiles(page)
-  } catch (e) {
-    console.error('Error eliminando egresado:', e)
-    if (msg) {
-      msg.textContent = 'Error de conexión al eliminar el egresado'
-      msg.style.color = 'red'
-    }
-  }
-}
-
 // Conecta formularios, botones y enlaces con las funciones de la interfaz para que respondan a la interacción del usuario.
 function setupEventListeners() {
   // Vincula los controles HTML a las funciones de negocio del frontend.
@@ -961,7 +1013,7 @@ function setupEventListeners() {
         banDialog.close()
         banForm.reset()
         banTargetUserId = null
-        loadProfiles(profilesState.page)
+        loadProfiles(profilesState.page, true)
       }
     })
   }
