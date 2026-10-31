@@ -1,12 +1,16 @@
 """API principal de Lorekeeper para catálogo, préstamos y perfiles."""
 
+import base64
 import datetime
+import hashlib
+import hmac
 import inspect
+import secrets
+import time
 from functools import wraps
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -16,6 +20,10 @@ from backend.db import get_engine
 from backend.user_deletion import ensure_no_active_loans
 
 app = FastAPI(title='Lorekeeper API')
+SESSION_COOKIE = 'lorekeeper_session'
+SESSION_TTL_SECONDS = 12 * 60 * 60
+PASSWORD_HASH_ITERATIONS = 600_000
+sessions: dict[str, tuple[int, float]] = {}
 
 
 def current_timestamp() -> str:
@@ -29,14 +37,6 @@ def format_datetime(value) -> str | None:
 def format_date(value) -> str | None:
     return value.strftime('%Y-%m-%d') if value else None
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 engine = get_engine()
 
 # El motor SQLAlchemy es el punto central del backend.
@@ -45,32 +45,11 @@ engine = get_engine()
 # La conexión ya quedó preparada en el módulo de base de datos y se reutiliza
 # para todas las operaciones de la biblioteca: usuarios, libros, préstamos y reportes.
 
-# Aquí se definen los roles base y los usuarios iniciales que van a poder entrar al sistema.
+# Aquí se define la cuenta administrativa cuyas operaciones requieren autorización adicional.
 ADMIN_EMAIL = 'Bibliotecario.fanoba@tecnica29de6.edu.ar'
 PROTECTED_ROUTE_ROLES = {
     '/api/books': {'Bibliotecario'},
 }
-
-DEFAULT_USERS = [
-    {
-        'Nombre_Completo': 'Vladimir Gaspar',
-        'Gmail': 'vladimir.gaspar.672@alu.tecnica29de6.edu.ar',
-        'Contraseña': 'hash_pass_123',
-        'Tipo': 'Alumno',
-    },
-    {
-        'Nombre_Completo': 'Alan Etkin',
-        'Gmail': 'alan.etkin@tecnica29de6.edu.ar',
-        'Contraseña': 'hash_pass_profe',
-        'Tipo': 'Profesor',
-    },
-    {
-        'Nombre_Completo': 'Bibliotecario Fanoba',
-        'Gmail': ADMIN_EMAIL,
-        'Contraseña': 'hash_pass_67',
-        'Tipo': 'Bibliotecario',
-    },
-]
 
 VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
@@ -106,33 +85,6 @@ def ensure_user_role_column():
 
 ensure_user_state_column()
 ensure_user_role_column()
-
-
-# Se cargan cuentas de ejemplo para probar la app desde el primer inicio.
-# Así se puede entrar con alumno, profesor y bibliotecario sin crear usuarios manualmente.
-def ensure_default_users():
-    with engine.begin() as conn:
-        for user in DEFAULT_USERS:
-            existing = conn.execute(
-                text('SELECT 1 FROM Usuario WHERE Gmail = :g'),
-                {'g': user['Gmail']}
-            ).fetchone()
-            if not existing:
-                conn.execute(
-                    text(
-                        "INSERT INTO Usuario (Nombre_Completo, Gmail, Contraseña, Estado, Tipo)"
-                        " VALUES (:nombre, :gmail, :pass, 'no vetado', :tipo)"
-                    ),
-                    {
-                        'nombre': user['Nombre_Completo'],
-                        'gmail': user['Gmail'],
-                        'pass': user['Contraseña'],
-                        'tipo': user['Tipo'],
-                    }
-                )
-
-
-ensure_default_users()
 
 
 def ensure_baja_ejemplares_table():
@@ -313,40 +265,6 @@ def ensure_loan_schema():
             "Applied_At DATETIME NOT NULL"
             ") ENGINE=InnoDB"
         ))
-        legacy_table_exists = conn.execute(
-            text(
-                "SELECT 1 FROM information_schema.TABLES "
-                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Reserva_Ejemplares'"
-            )
-        ).fetchone()
-        stock_release_done = conn.execute(
-            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = 'release_legacy_reservation_stock_v1'")
-        ).fetchone()
-        if not stock_release_done:
-            if legacy_table_exists:
-                conn.execute(text(
-                    "UPDATE Libro l JOIN ("
-                    "SELECT ID_Libro, SUM(COALESCE(Cantidad, 0)) AS Cantidad "
-                    "FROM Reserva_Ejemplares GROUP BY ID_Libro"
-                    ") r ON r.ID_Libro = l.ID_Libro "
-                    "SET l.Stock = COALESCE(l.Stock, 0) + r.Cantidad"
-                ))
-            conn.execute(
-                text("INSERT INTO Schema_Migration (Migration_Key, Applied_At) VALUES "
-                     "('release_legacy_reservation_stock_v1', CURRENT_TIMESTAMP)")
-            )
-        legacy_cleanup_done = conn.execute(
-            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = 'remove_legacy_reservations_v1'")
-        ).fetchone()
-        if not legacy_cleanup_done:
-            if legacy_table_exists:
-                conn.execute(text("DELETE FROM Reserva_Ejemplares"))
-            conn.execute(
-                text("INSERT INTO Schema_Migration (Migration_Key, Applied_At) VALUES "
-                     "('remove_legacy_reservations_v1', CURRENT_TIMESTAMP)")
-            )
-
-
 ensure_loan_schema()
 
 
@@ -474,14 +392,79 @@ class UserProfileUpdate(BaseModel):
 
 
 class LoginIn(BaseModel):
-    Gmail: str
+    Gmail: str = Field(..., min_length=1, max_length=320)
     Contraseña: str
 
 
 class SignupIn(BaseModel):
-    Nombre_Completo: str
-    Gmail: str
+    Nombre_Completo: str = Field(..., min_length=1, max_length=100)
+    Gmail: str = Field(..., min_length=1, max_length=320)
     Contraseña: str
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        'sha256', password.encode('utf-8'), salt, PASSWORD_HASH_ITERATIONS
+    )
+    salt_encoded = base64.urlsafe_b64encode(salt).decode('ascii').rstrip('=')
+    digest_encoded = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+    return f'pbkdf2_sha256${PASSWORD_HASH_ITERATIONS}${salt_encoded}${digest_encoded}'
+
+
+def verify_password(password: str, stored_password: str | None) -> tuple[bool, bool]:
+    if not stored_password:
+        return False, False
+    if stored_password.startswith('pbkdf2_sha256$'):
+        try:
+            algorithm, iterations, salt_encoded, digest_encoded = stored_password.split('$')
+            if algorithm != 'pbkdf2_sha256':
+                return False, False
+            salt = base64.urlsafe_b64decode(salt_encoded + '=' * (-len(salt_encoded) % 4))
+            expected = base64.urlsafe_b64decode(digest_encoded + '=' * (-len(digest_encoded) % 4))
+            if len(salt) != 16 or len(expected) != 32:
+                return False, False
+            iteration_count = int(iterations)
+            if not 100_000 <= iteration_count <= 2_000_000:
+                return False, False
+            actual = hashlib.pbkdf2_hmac(
+                'sha256', password.encode('utf-8'), salt, iteration_count
+            )
+        except (ValueError, TypeError):
+            return False, False
+        return hmac.compare_digest(actual, expected), False
+    return hmac.compare_digest(
+        password.encode('utf-8'), stored_password.encode('utf-8')
+    ), True
+
+
+def create_session(response: Response, user_id: int, request: Request):
+    token = secrets.token_urlsafe(32)
+    sessions[hashlib.sha256(token.encode('ascii')).hexdigest()] = (
+        user_id, time.time() + SESSION_TTL_SECONDS
+    )
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=request.url.scheme == 'https',
+        samesite='lax',
+        path='/',
+    )
+
+
+def clear_session(response: Response, request: Request):
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        sessions.pop(hashlib.sha256(token.encode('utf-8')).hexdigest(), None)
+    response.delete_cookie(
+        SESSION_COOKIE,
+        httponly=True,
+        secure=request.url.scheme == 'https',
+        samesite='lax',
+        path='/',
+    )
 
 
 # El rol del usuario se infiere con la misma lógica que usa la interfaz para mostrar
@@ -500,18 +483,19 @@ def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
     return 'Alumno' if '@alu.' in gmail.lower() else 'Profesor'
 
 
-# Busca la identidad del usuario en las cabeceras HTTP o en cookies.
-# Devuelve el ID y el tipo de usuario para que las rutas protegidas puedan validar acceso.
-def get_request_identity(request: Request) -> tuple[int | None, str | None]:
-    user_id = request.headers.get('x-user-id') or request.headers.get('X-User-Id')
-    user_type = request.headers.get('x-user-type') or request.headers.get('X-User-Type')
-    if not user_id:
-        user_id = request.cookies.get('session_user_id')
-    if not user_type:
-        user_type = request.cookies.get('session_user_type')
-    if user_id and user_id.isdigit():
-        return int(user_id), user_type
-    return None, user_type
+def get_request_identity(request: Request) -> int | None:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    key = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    session = sessions.get(key)
+    if not session:
+        return None
+    user_id, expires_at = session
+    if expires_at <= time.time():
+        sessions.pop(key, None)
+        return None
+    return user_id
 
 
 def ensure_user_not_banned(conn, row):
@@ -557,7 +541,7 @@ def get_authenticated_user(
             raise HTTPException(status_code=403, detail='No tiene permisos para esta acción')
         return cached_user
 
-    user_id, user_type = get_request_identity(request)
+    user_id = get_request_identity(request)
     if not user_id:
         raise HTTPException(status_code=401, detail='No autenticado')
 
@@ -567,7 +551,7 @@ def get_authenticated_user(
         row = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
-                "Curso, Division, Cuenta_Activa "
+                "Curso, Division, Cuenta_Activa, Es_Egresado "
                 "FROM Usuario WHERE ID_Usuario = :id"
             ),
             {'id': user_id},
@@ -577,12 +561,7 @@ def get_authenticated_user(
         ensure_user_active(row)
         ensure_user_not_banned(conn, row)
 
-    # Normaliza el tipo de usuario según el correo y los datos guardados.
     actual_type = infer_user_type(row[2], row[4])
-    if not user_type:
-        user_type = actual_type
-    if user_type.lower() != actual_type.lower():
-        raise HTTPException(status_code=403, detail='Rol no autorizado')
 
     if allowed_roles and actual_type not in allowed_roles:
         raise HTTPException(status_code=403, detail='No tiene permisos para esta acción')
@@ -600,6 +579,7 @@ def get_authenticated_user(
         'Curso': row[7],
         'Division': row[8],
         'Cuenta_Activa': bool(row[9]),
+        'Es_Egresado': bool(row[10]),
     }
     request.state.user = user
     return user
@@ -694,8 +674,10 @@ def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
 
 @app.middleware('http')
 async def enforce_role_middleware(request: Request, call_next):
-    user_id, _ = get_request_identity(request)
-    if user_id and request.url.path.startswith('/api/') and request.url.path not in ('/api/login', '/api/signup'):
+    user_id = get_request_identity(request)
+    if user_id and request.url.path.startswith('/api/') and request.url.path not in (
+        '/api/login', '/api/signup', '/api/logout'
+    ):
         try:
             if request.url.path in PROTECTED_ROUTE_ROLES:
                 get_authenticated_user(
@@ -1089,7 +1071,7 @@ def update_profile(request: Request, data: UserProfileUpdate):
 
 @app.get('/api/search')
 def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
-    user_id, _ = get_request_identity(request)
+    user_id = get_request_identity(request)
     if user_id:
         user = get_authenticated_user(request)
         if user['Tipo'] in ('Alumno', 'Profesor') and (
@@ -1632,25 +1614,35 @@ def delete_history_bajas(request: Request):
 
 
 @app.post('/api/login')
-def login(data: LoginIn):
+def login(data: LoginIn, request: Request, response: Response):
     """Iniciar sesión con Gmail y Contraseña"""
+    if not 1 <= len(data.Contraseña) <= 256:
+        raise HTTPException(status_code=400, detail='La contraseña tiene un formato inválido')
     with engine.begin() as conn:
         r = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
-                "Curso, Division, Cuenta_Activa, Es_Egresado "
-                "FROM Usuario WHERE Gmail = :g AND Contraseña = :p"
+                "Curso, Division, Cuenta_Activa, Es_Egresado, Contraseña "
+                "FROM Usuario WHERE Gmail = :g"
             ),
-            {'g': data.Gmail, 'p': data.Contraseña},
+            {'g': data.Gmail},
         ).fetchone()
         if not r:
             raise HTTPException(status_code=401, detail='Credenciales inválidas')
+        password_valid, is_legacy_password = verify_password(data.Contraseña, r[11])
+        if not password_valid:
+            raise HTTPException(status_code=401, detail='Credenciales inválidas')
+        if is_legacy_password:
+            conn.execute(
+                text("UPDATE Usuario SET Contraseña = :password WHERE ID_Usuario = :id"),
+                {'password': hash_password(data.Contraseña), 'id': r[0]},
+            )
         ensure_user_active(r)
         ensure_user_not_banned(conn, r)
         state = 'no vetado' if r[3] == 'vetado' and r[6] else r[3]
         gmail = r[2]
         tipo = infer_user_type(gmail, r[4])
-        return {
+        result = {
             'ID_Usuario': r[0],
             'Nombre_Completo': r[1],
             'Gmail': r[2],
@@ -1661,11 +1653,42 @@ def login(data: LoginIn):
             'Cuenta_Activa': bool(r[9]),
             'Es_Egresado': bool(r[10]),
         }
+    create_session(response, r[0], request)
+    return result
+
+
+@app.get('/api/session')
+def get_session(request: Request):
+    user = get_authenticated_user(request)
+    return {
+        'ID_Usuario': user['ID_Usuario'],
+        'Nombre_Completo': user['Nombre_Completo'],
+        'Gmail': user['Gmail'],
+        'Estado': user['Estado'],
+        'Tipo': user['Tipo'],
+        'Curso': user['Curso'],
+        'Division': user['Division'],
+        'Cuenta_Activa': user['Cuenta_Activa'],
+        'Es_Egresado': user['Es_Egresado'],
+    }
+
+
+@app.post('/api/logout')
+def logout(request: Request, response: Response):
+    clear_session(response, request)
+    return {'ok': True}
 
 
 @app.post('/api/signup')
-def signup(data: SignupIn):
+def signup(data: SignupIn, request: Request, response: Response):
     """Crear nueva cuenta de usuario. Detecta automáticamente el tipo (Alumno/Profesor) según el Gmail."""
+    if not 12 <= len(data.Contraseña) <= 256:
+        raise HTTPException(
+            status_code=400,
+            detail='La contraseña debe tener entre 12 y 256 caracteres',
+        )
+    if data.Gmail.strip().lower() == ADMIN_EMAIL.lower():
+        raise HTTPException(status_code=403, detail='Esta cuenta no puede registrarse desde el formulario público')
     tipo = infer_user_type(data.Gmail)
     with engine.begin() as conn:
         # Verificar si el Gmail ya existe
@@ -1677,12 +1700,15 @@ def signup(data: SignupIn):
             "INSERT INTO Usuario (Nombre_Completo, Gmail, Contraseña, Estado, Tipo)"
             " VALUES (:nombre, :gmail, :contraseña, 'no vetado', :tipo)"
         )
-        try:
-            res = conn.execute(stmt, {'nombre': data.Nombre_Completo, 'gmail': data.Gmail, 'contraseña': data.Contraseña, 'tipo': tipo})
-            new_id = res.lastrowid
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        return {'ok': True, 'ID_Usuario': new_id, 'Nombre_Completo': data.Nombre_Completo, 'Gmail': data.Gmail, 'Tipo': tipo}
+        res = conn.execute(stmt, {
+            'nombre': data.Nombre_Completo,
+            'gmail': data.Gmail,
+            'contraseña': hash_password(data.Contraseña),
+            'tipo': tipo,
+        })
+        new_id = res.lastrowid
+    create_session(response, new_id, request)
+    return {'ok': True, 'ID_Usuario': new_id, 'Nombre_Completo': data.Nombre_Completo, 'Gmail': data.Gmail, 'Tipo': tipo}
 
 
 # Se sirven los archivos estáticos que componen la interfaz web de la biblioteca.

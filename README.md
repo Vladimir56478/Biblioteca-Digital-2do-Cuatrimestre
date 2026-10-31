@@ -19,7 +19,8 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Configura `backend/.env` con la conexión local de la biblioteca:
+Configura `backend/.env` con la conexión a MySQL de esta computadora. MySQL debe
+escuchar solo en `127.0.0.1`; no se debe exponer su puerto a la red:
 
 ```ini
 MYSQL_ADDON_HOST=127.0.0.1
@@ -29,28 +30,54 @@ MYSQL_ADDON_PASSWORD=tu_clave_local
 MYSQL_ADDON_DB=biblioteca_digital
 ```
 
-También se admite `MYSQL_ADDON_URI`, `MYSQL_ADDON_URL` o `DATABASE_URL`; si se
-usa una URI, comprueba que apunte a la base local prevista antes de iniciar la
-aplicación. No se crea una base separada automáticamente.
+También se admiten `MYSQL_ADDON_URI`, `MYSQL_ADDON_URL` y `DATABASE_URL`, pero
+Lorekeeper rechaza conexiones MySQL cuyo host no sea local. No se crea una base
+separada automáticamente ni se necesita Internet para usar la aplicación una
+vez instaladas sus dependencias.
 
-## Inicio
+## Inicio local y acceso por LAN
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+En la computadora anfitriona abre <http://localhost:8000/>. El servidor escucha
+en todas las interfaces, pero el Firewall de Windows debe permitir TCP 8000
+para que otros equipos puedan conectarse. En una terminal de PowerShell como
+administrador, crea una regla limitada a redes privadas:
+
+```powershell
+New-NetFirewallRule -DisplayName "Lorekeeper TCP 8000" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private
+```
+
+Consulta la IP con `ipconfig` y usa la dirección IPv4 del adaptador conectado a
+la misma red Wi-Fi/LAN que los demás dispositivos. Desde cada dispositivo abre
+`http://IP-DE-LA-PC:8000/` (reemplaza el texto por esa IP; puede cambiar al
+cambiar de red). No configures port forwarding en el router y no abras TCP
+3306: solo la computadora anfitriona se conecta a MySQL, que permanece en
+`127.0.0.1`. Todos los clientes utilizan la misma base de datos del anfitrión.
+
+Para desarrollo local también se puede iniciar con recarga automática:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Abre <http://localhost:8000/>.
+Al iniciar, el backend aplica cambios de esquema existentes si faltan columnas
+y tablas. No agrega cuentas de demostración ni elimina o reinicializa usuarios,
+libros, préstamos o reservas heredadas. Las cuentas existentes conservan sus
+contraseñas: al iniciar sesión correctamente, una contraseña heredada en texto
+plano se reemplaza por su hash PBKDF2. Las cuentas nuevas requieren al menos 12
+caracteres.
 
-En cada inicio el backend aplica cambios idempotentes: agrega campos de curso,
-división, veto, clasificación de egresado y actividad de cuenta si faltan,
-crea `Cuaderno_Diario`, `Ficha_Domiciliaria` y sus índices/relaciones, y
-registra las migraciones aplicadas en `Schema_Migration`. Las cuentas existentes
-se inicializan activas y como no egresadas.
-La migración `remove_legacy_reservations_v1` vacía una sola vez los registros de
-prueba de `Reserva_Ejemplares` y devuelve su cantidad a `Libro.Stock` disponible
-sin tocar `Stock_Total`. No elimina esa tabla ni borra usuarios, libros, autores,
-logs u otras filas. Haz un respaldo de la base antes de desplegar cambios de
-esquema.
+La sesión se mantiene en una cookie HttpOnly del navegador y es independiente
+por dispositivo. HTTP en una LAN compartida no cifra las credenciales ni los
+datos transmitidos. Antes de usar cuentas o datos reales, prepara HTTPS y revisa
+la protección contra CSRF apropiada para las sesiones mediante cookies.
+
+`backend/.env` está excluido por `.gitignore`; no publiques sus valores. Si alguna
+contraseña que estuvo compartida sigue vigente, cámbiala. Usa credenciales
+únicas y robustas para MySQL y las cuentas antes de incorporar datos reales.
 
 ## Uso y reglas
 

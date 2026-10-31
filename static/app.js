@@ -4,7 +4,7 @@
   la edición del catálogo, los préstamos y la comunicación con la API del backend.
 */
 
-// Estado global de la app para conservar la sesión del usuario entre recargas de la página.
+// Estado de presentación; la identidad real se obtiene del backend mediante la cookie de sesión.
 let authState = {
   isAuthenticated: false,
   ID_Usuario: null,
@@ -16,40 +16,45 @@ let currentEditBookStock = null
 let historyCurrentTab = 'bajas'
 let banTargetUserId = null
 
-// Recupera la sesión guardada en el navegador para volver a entrar a la app sin pedir login otra vez.
-// Si ya había un usuario autenticado, muestra la vista principal directamente.
-function loadAuthState() {
-  const stored = localStorage.getItem('authState')
-  if (stored) {
-    authState = JSON.parse(stored)
+async function loadAuthState() {
+  try {
+    const response = await fetch('/api/session')
+    if (response.ok) {
+      const user = await response.json()
+      authState = { ...user, isAuthenticated: true }
+      updateUIBasedOnAuth()
+      showView('home')
+      return
+    }
+    if (response.status !== 401) {
+      const result = await response.json()
+      const message = document.getElementById('loginMsg')
+      if (message) message.textContent = 'No se pudo verificar la sesión: ' + (result.detail || 'Error')
+    }
+  } catch {
+    const message = document.getElementById('loginMsg')
+    if (message) message.textContent = 'No se pudo conectar con el servidor para verificar la sesión.'
   }
   updateUIBasedOnAuth()
-  if (authState.isAuthenticated) {
-    showView('home')
-  }
-}
-
-// Guarda la sesión actual para que los datos del usuario sigan disponibles en esa misma máquina.
-function saveAuthState() {
-  localStorage.setItem('authState', JSON.stringify(authState))
 }
 
 function getAuthHeaders(extra = {}) {
-  const headers = { ...extra }
-  if (authState.ID_Usuario) headers['X-User-Id'] = String(authState.ID_Usuario)
-  if (authState.Tipo) headers['X-User-Type'] = authState.Tipo
-  return headers
-
-// Añade la información del usuario a cada petición protegida.
-// El backend usa estos valores para verificar permisos.
+  return { ...extra }
 }
 
-// Las cabeceras del usuario se envían en cada petición protegida
-// para que el backend pueda saber quién hace la acción.
-// Cerrar sesión
-function logout() {
+async function logout() {
+  let response
+  try {
+    response = await fetch('/api/logout', { method: 'POST' })
+  } catch {
+    alert('No se pudo conectar con el servidor para cerrar la sesión.')
+    return
+  }
+  if (!response.ok) {
+    alert('No se pudo cerrar la sesión en el servidor.')
+    return
+  }
   authState = { isAuthenticated: false, ID_Usuario: null, Nombre_Completo: null, Tipo: null }
-  localStorage.removeItem('authState')
   updateUIBasedOnAuth()
   showView('account')
 }
@@ -479,7 +484,6 @@ async function loadProfile() {
     catalog.style.display = complete ? 'block' : 'none'
     authState.Curso = data.Curso
     authState.Division = data.Division
-    saveAuthState()
   } catch (error) {
     catalog.style.display = 'none'
     const msg = document.getElementById('profileMsg')
@@ -1048,7 +1052,6 @@ function setupEventListeners() {
         if (!response.ok) throw new Error(result.detail || 'No se pudo guardar el perfil')
         authState.Curso = result.Curso
         authState.Division = result.Division
-        saveAuthState()
         if (msg) {
           msg.textContent = 'Curso y división guardados.'
           msg.style.color = 'green'
@@ -1190,7 +1193,6 @@ function setupEventListeners() {
         authState.Tipo = j.Tipo
         authState.Curso = j.Curso
         authState.Division = j.Division
-        saveAuthState()
         updateUIBasedOnAuth()
         if (msg) msg.textContent = ''
         e.target.reset()
@@ -1224,7 +1226,6 @@ function setupEventListeners() {
         authState.Tipo = j.Tipo
         authState.Curso = j.Curso || null
         authState.Division = j.Division || null
-        saveAuthState()
         updateUIBasedOnAuth()
         if (msg) {
           msg.textContent = 'Cuenta creada exitosamente'
@@ -1472,52 +1473,3 @@ if (document.readyState === 'loading') {
   // El DOM ya está cargado (por ejemplo, si el script es async)
   initializeApp()
 }
-
-// También intentar configurar inmediatamente si los elementos ya existen
-try {
-  console.log('[APP] Intentando configuración inmediata...')
-  const signupForm = document.getElementById('signupForm')
-  if (signupForm && !signupForm.__setupDone) {
-    console.log('[APP] Configurando formulario de registro inmediatamente')
-    signupForm.__setupDone = true
-    signupForm.addEventListener('submit', async (e) => {
-      e.preventDefault()
-      console.log('[SIGNUP] Formulario enviado')
-      const data = Object.fromEntries(new FormData(e.target).entries())
-      const res = await fetch('/api/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      })
-      const j = await res.json()
-      const msg = document.getElementById('signupMsg')
-      if (res.ok) {
-        authState.isAuthenticated = true
-        authState.ID_Usuario = j.ID_Usuario
-        authState.Nombre_Completo = j.Nombre_Completo
-        authState.Tipo = j.Tipo
-        saveAuthState()
-        updateUIBasedOnAuth()
-        if (msg) {
-          msg.textContent = 'Cuenta creada'
-          msg.style.color = 'green'
-        }
-        e.target.reset()
-        showView('home')
-      } else {
-        if (msg) {
-          msg.textContent = 'Error: ' + (j.detail || 'Error')
-          msg.style.color = 'red'
-        }
-      }
-    })
-  }
-} catch (e) {
-    console.error('[APP] Error en la configuración inmediata:', e)
-  }
-
-console.log('[APP] Configuración completa, esperando el DOM...')
-// Agregar interceptor global de envío de formularios
-
-
-console.log('[APP] Interceptor global de formularios agregado')
