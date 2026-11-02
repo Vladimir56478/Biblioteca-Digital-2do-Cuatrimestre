@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import inspect as sqlalchemy_inspect, text
 
 from backend.db import get_engine
 from backend.user_deletion import ensure_no_active_loans
@@ -56,20 +56,22 @@ VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 # Al iniciar la API se revisa y actualiza el esquema si hace falta.
 def ensure_user_state_column():
-    try:
-        with engine.begin() as conn:
-            conn.execute(text('SELECT Estado FROM Usuario LIMIT 1'))
-    except Exception:
+    columns = {
+        column['name'].lower()
+        for column in sqlalchemy_inspect(engine).get_columns('Usuario')
+    }
+    if 'estado' not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE Usuario ADD COLUMN Estado VARCHAR(30) DEFAULT 'no vetado'"))
             conn.execute(text("UPDATE Usuario SET Estado = 'no vetado' WHERE Estado IS NULL"))
 
 
 def ensure_user_role_column():
-    try:
-        with engine.begin() as conn:
-            conn.execute(text('SELECT Tipo FROM Usuario LIMIT 1'))
-    except Exception:
+    columns = {
+        column['name'].lower()
+        for column in sqlalchemy_inspect(engine).get_columns('Usuario')
+    }
+    if 'tipo' not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE Usuario ADD COLUMN Tipo VARCHAR(30) DEFAULT 'Alumno'"))
             conn.execute(

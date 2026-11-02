@@ -19,21 +19,27 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Configura `backend/.env` con la conexión a MySQL de esta computadora. MySQL debe
-escuchar solo en `127.0.0.1`; no se debe exponer su puerto a la red:
+Configura `backend/.env` con la conexión que quieras usar. Para MySQL local,
+deja activa la configuración por variables individuales. MySQL debe escuchar
+solo en `127.0.0.1`; no se debe exponer su puerto a la red:
 
 ```ini
 MYSQL_ADDON_HOST=127.0.0.1
 MYSQL_ADDON_PORT=3306
 MYSQL_ADDON_USER=root
-MYSQL_ADDON_PASSWORD=tu_clave_local
+MYSQL_ADDON_PASSWORD=COMPLETAR_CON_LA_CLAVE_LOCAL
 MYSQL_ADDON_DB=biblioteca_digital
 ```
 
-También se admiten `MYSQL_ADDON_URI`, `MYSQL_ADDON_URL` y `DATABASE_URL`, pero
-Lorekeeper rechaza conexiones MySQL cuyo host no sea local. No se crea una base
-separada automáticamente ni se necesita Internet para usar la aplicación una
-vez instaladas sus dependencias.
+Para alternar a Clever Cloud sin una URI, descomenta en `backend/.env` el bloque
+`MYSQL_CLEVER_CLOUD_*` y completa su contraseña. Ese bloque específico selecciona
+la base remota; para volver a local, coméntalo nuevamente. Las variables
+individuales locales `MYSQL_ADDON_*` siguen limitadas a loopback. También se
+admiten `MYSQL_ADDON_URI`, `MYSQL_ADDON_URL` y `DATABASE_URL`; una URI activa
+tiene prioridad sobre ambos bloques. No se crea una base automáticamente.
+
+`backend/.env` contiene credenciales: no lo publiques ni lo agregues al
+repositorio. El archivo está excluido por `.gitignore`.
 
 ## Inicio local y acceso por LAN
 
@@ -113,3 +119,5 @@ contraseña que estuvo compartida sigue vigente, cámbiala. Usa credenciales
 
 Las fechas de préstamo/vencimiento/devolución se almacenan como `DATE` y se
 presentan como `dd/mm/aaaa` en las vistas de préstamos.
+
+# .\.venv\Scripts\python.exe -c "from backend.db import get_engine; u=get_engine().url; print('Host:', u.host); print('Base:', u.database)"

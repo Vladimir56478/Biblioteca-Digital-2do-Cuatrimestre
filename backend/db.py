@@ -2,7 +2,7 @@ import ipaddress
 import os
 from pathlib import Path
 from sqlalchemy import create_engine, MetaData
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL
 from dotenv import load_dotenv
 
 # Carga la configuración de conexión desde backend/.env para que la app pueda
@@ -29,20 +29,42 @@ def ensure_local_mysql_host(host):
 if MYSQL_URI:
     if MYSQL_URI.startswith('mysql://'):
         MYSQL_URI = MYSQL_URI.replace('mysql://', 'mysql+pymysql://', 1)
-    ensure_local_mysql_host(make_url(MYSQL_URI).host)
     engine = create_engine(MYSQL_URI, pool_pre_ping=True, hide_parameters=True)
 else:
-    DB_HOST = os.getenv('MYSQL_ADDON_HOST', '127.0.0.1')
-    DB_PORT = int(os.getenv('MYSQL_ADDON_PORT', 3306))
-    DB_USER = os.getenv('MYSQL_ADDON_USER', 'root')
-    DB_PASS = os.getenv('MYSQL_ADDON_PASSWORD')
-    DB_NAME = os.getenv('MYSQL_ADDON_DB', 'biblioteca_digital')
-    ensure_local_mysql_host(DB_HOST)
-    if not DB_PASS:
-        raise RuntimeError('Configura MYSQL_ADDON_PASSWORD en backend/.env antes de iniciar Lorekeeper.')
+    CLEVER_CLOUD_HOST = os.getenv('MYSQL_CLEVER_CLOUD_HOST')
+    if CLEVER_CLOUD_HOST:
+        DB_HOST = CLEVER_CLOUD_HOST
+        DB_PORT = int(os.getenv('MYSQL_CLEVER_CLOUD_PORT', 3306))
+        DB_USER = os.getenv('MYSQL_CLEVER_CLOUD_USER')
+        DB_PASS = os.getenv('MYSQL_CLEVER_CLOUD_PASSWORD')
+        DB_NAME = os.getenv('MYSQL_CLEVER_CLOUD_DB')
+        if not DB_USER or not DB_NAME:
+            raise RuntimeError('Configura usuario y base en backend/.env para Clever Cloud.')
+    else:
+        DB_HOST = os.getenv('MYSQL_ADDON_HOST', '127.0.0.1')
+        DB_PORT = int(os.getenv('MYSQL_ADDON_PORT', 3306))
+        DB_USER = os.getenv('MYSQL_ADDON_USER', 'root')
+        DB_PASS = os.getenv('MYSQL_ADDON_PASSWORD')
+        DB_NAME = os.getenv('MYSQL_ADDON_DB', 'biblioteca_digital')
+        ensure_local_mysql_host(DB_HOST)
 
-    conn_str = f'mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-    engine = create_engine(conn_str, pool_pre_ping=True, hide_parameters=True)
+    if not DB_PASS:
+        password_variable = (
+            'MYSQL_CLEVER_CLOUD_PASSWORD'
+            if CLEVER_CLOUD_HOST
+            else 'MYSQL_ADDON_PASSWORD'
+        )
+        raise RuntimeError(f'Configura {password_variable} en backend/.env antes de iniciar Lorekeeper.')
+
+    connection_url = URL.create(
+        'mysql+pymysql',
+        username=DB_USER,
+        password=DB_PASS,
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+    )
+    engine = create_engine(connection_url, pool_pre_ping=True, hide_parameters=True)
 
 # El metadata funciona como el mapa del esquema de la base para que el backend
 # mantenga coherencia entre tablas, consultas y operaciones del sistema.
