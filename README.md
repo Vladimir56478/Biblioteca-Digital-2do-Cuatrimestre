@@ -8,8 +8,8 @@ perfiles, préstamos escolares (Cuaderno Diario), préstamos domiciliarios
 ## Requisitos
 
 - Python 3.10 o posterior
-- MySQL 8 con InnoDB y una base local existente con las tablas `Usuario`,
-  `Libro` y `Autor`
+- MySQL 8 con InnoDB y una base existente con las tablas `usuario`, `libro` y
+  `autor` (los nombres deben coincidir con las tablas configuradas en MySQL)
 
 ## Instalación y configuración
 
@@ -97,7 +97,7 @@ contraseña que estuvo compartida sigue vigente, cámbiala. Usa credenciales
 - La Ficha Domiciliaria solo puede asignarse a una cuenta Profesor. El título y
   autor proceden del catálogo; se guardan los datos de ficha, los días
   corridos (30 por defecto) y la fecha límite calculada.
-- Ambos préstamos descuentan únicamente `Libro.Stock`; `Libro.Stock_Total`
+- Ambos préstamos descuentan únicamente `libro.Stock`; `libro.Stock_Total`
   conserva el inventario total. Los registros vencidos siguen activos hasta que
   la Bibliotecaria registra la devolución total.
 - Alumno y Profesor solo ven sus propios préstamos activos e historial. Un

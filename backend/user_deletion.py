@@ -5,13 +5,13 @@ from sqlalchemy import text
 def ensure_no_active_loans(conn, user_id: int) -> None:
     active_loan = conn.execute(
         text(
-            "SELECT 1 FROM Cuaderno_Diario "
+            "SELECT 1 FROM cuaderno_diario "
             "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
             "UNION ALL "
-            "SELECT 1 FROM Cuaderno_Diario "
+            "SELECT 1 FROM cuaderno_diario "
             "WHERE ID_Retira = :user_id AND Estado = 'Activo' "
             "UNION ALL "
-            "SELECT 1 FROM Ficha_Domiciliaria "
+            "SELECT 1 FROM ficha_domiciliaria "
             "WHERE ID_Responsable = :user_id AND Estado = 'Activo' "
             "LIMIT 1"
         ),

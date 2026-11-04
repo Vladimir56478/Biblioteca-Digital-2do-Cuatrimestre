@@ -58,25 +58,25 @@ VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 def ensure_user_state_column():
     columns = {
         column['name'].lower()
-        for column in sqlalchemy_inspect(engine).get_columns('Usuario')
+        for column in sqlalchemy_inspect(engine).get_columns('usuario')
     }
     if 'estado' not in columns:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE Usuario ADD COLUMN Estado VARCHAR(30) DEFAULT 'no vetado'"))
-            conn.execute(text("UPDATE Usuario SET Estado = 'no vetado' WHERE Estado IS NULL"))
+            conn.execute(text("ALTER TABLE usuario ADD COLUMN Estado VARCHAR(30) DEFAULT 'no vetado'"))
+            conn.execute(text("UPDATE usuario SET Estado = 'no vetado' WHERE Estado IS NULL"))
 
 
 def ensure_user_role_column():
     columns = {
         column['name'].lower()
-        for column in sqlalchemy_inspect(engine).get_columns('Usuario')
+        for column in sqlalchemy_inspect(engine).get_columns('usuario')
     }
     if 'tipo' not in columns:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE Usuario ADD COLUMN Tipo VARCHAR(30) DEFAULT 'Alumno'"))
+            conn.execute(text("ALTER TABLE usuario ADD COLUMN Tipo VARCHAR(30) DEFAULT 'Alumno'"))
             conn.execute(
                 text(
-                    "UPDATE Usuario SET Tipo = CASE "
+                    "UPDATE usuario SET Tipo = CASE "
                     "WHEN Gmail = :admin THEN 'Bibliotecario' "
                     "WHEN Gmail LIKE :alu THEN 'Alumno' "
                     "ELSE 'Profesor' END"
@@ -92,15 +92,15 @@ ensure_user_role_column()
 def ensure_baja_ejemplares_table():
     with engine.begin() as conn:
         conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS Baja_Ejemplares ("
+            "CREATE TABLE IF NOT EXISTS baja_ejemplares ("
             "ID_Baja INT AUTO_INCREMENT PRIMARY KEY, "
             "ID_Libro INT NOT NULL, "
             "ID_Usuario_Bibliotecario INT NOT NULL, "
             "Cantidad INT NOT NULL, "
             "Motivo VARCHAR(50) NOT NULL, "
             "Fecha DATETIME NOT NULL, "
-            "FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
-            "FOREIGN KEY (ID_Usuario_Bibliotecario) REFERENCES Usuario(ID_Usuario)"
+            "FOREIGN KEY (ID_Libro) REFERENCES libro(ID_Libro), "
+            "FOREIGN KEY (ID_Usuario_Bibliotecario) REFERENCES usuario(ID_Usuario)"
             ") ENGINE=InnoDB"
         ))
 
@@ -113,15 +113,15 @@ VALID_LOG_TYPES = {'Préstamo Activo', 'Préstamo Devuelto', 'Stock Reducido'}
 def ensure_log_sistema_table():
     with engine.begin() as conn:
         conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS Log_Sistema ("
+            "CREATE TABLE IF NOT EXISTS log_sistema ("
             "ID INT AUTO_INCREMENT PRIMARY KEY, "
             "Tipo_Evento VARCHAR(50) NOT NULL, "
             "ID_Usuario INT NOT NULL, "
             "ID_Libro INT NOT NULL, "
             "Descripcion TEXT, "
             "Fecha DATETIME NOT NULL, "
-            "FOREIGN KEY (ID_Usuario) REFERENCES Usuario(ID_Usuario), "
-            "FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro)"
+            "FOREIGN KEY (ID_Usuario) REFERENCES usuario(ID_Usuario), "
+            "FOREIGN KEY (ID_Libro) REFERENCES libro(ID_Libro)"
             ") ENGINE=InnoDB"
         ))
 
@@ -138,7 +138,7 @@ def ensure_log_sistema_table():
             )).fetchone()
             if has_id_log:
                 conn.execute(text(
-                    "ALTER TABLE Log_Sistema CHANGE COLUMN ID_Log ID INT NOT NULL AUTO_INCREMENT"
+                    "ALTER TABLE log_sistema CHANGE COLUMN ID_Log ID INT NOT NULL AUTO_INCREMENT"
                 ))
 
 
@@ -152,15 +152,15 @@ def ensure_user_management_columns():
             for row in conn.execute(
                 text(
                     "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('Usuario', 'Log_Sistema')"
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('usuario', 'log_sistema')"
                 )
             ).fetchall()
         }
         user_columns = {
-            'Curso': "ALTER TABLE Usuario ADD COLUMN Curso TINYINT UNSIGNED NULL",
-            'Division': "ALTER TABLE Usuario ADD COLUMN Division TINYINT UNSIGNED NULL",
-            'Motivo_Veto': "ALTER TABLE Usuario ADD COLUMN Motivo_Veto VARCHAR(255) NULL",
-            'Veto_Hasta': "ALTER TABLE Usuario ADD COLUMN Veto_Hasta DATETIME NULL",
+            'Curso': "ALTER TABLE usuario ADD COLUMN Curso TINYINT UNSIGNED NULL",
+            'Division': "ALTER TABLE usuario ADD COLUMN Division TINYINT UNSIGNED NULL",
+            'Motivo_Veto': "ALTER TABLE usuario ADD COLUMN Motivo_Veto VARCHAR(255) NULL",
+            'Veto_Hasta': "ALTER TABLE usuario ADD COLUMN Veto_Hasta DATETIME NULL",
         }
         for column, statement in user_columns.items():
             if ('usuario', column.lower()) not in existing_columns:
@@ -169,21 +169,21 @@ def ensure_user_management_columns():
         table_exists = conn.execute(
             text(
                 "SELECT 1 FROM information_schema.TABLES "
-                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Log_Sistema'"
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_sistema'"
             )
         ).fetchone()
         if not table_exists:
-            raise RuntimeError('No existe Log_Sistema; no se puede preservar el historial de usuarios')
+            raise RuntimeError('No existe log_sistema; no se puede preservar el historial de usuarios')
         if ('log_sistema', 'id_usuario') not in existing_columns:
             nullable = conn.execute(
                 text(
                     "SELECT IS_NULLABLE FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Log_Sistema' "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_sistema' "
                     "AND COLUMN_NAME = 'ID_Usuario'"
                 ),
             ).scalar()
             if nullable == 'NO':
-                conn.execute(text('ALTER TABLE Log_Sistema MODIFY COLUMN ID_Usuario INT NULL'))
+                conn.execute(text('ALTER TABLE log_sistema MODIFY COLUMN ID_Usuario INT NULL'))
 
 
 ensure_user_management_columns()
@@ -194,7 +194,7 @@ def ensure_book_total_stock_column():
         has_total_stock = conn.execute(
             text(
                 "SELECT 1 FROM information_schema.COLUMNS "
-                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Libro' "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'libro' "
                 "AND COLUMN_NAME = 'Stock_Total'"
             )
         ).fetchone()
@@ -202,9 +202,9 @@ def ensure_book_total_stock_column():
             return
 
         conn.execute(text(
-            "ALTER TABLE Libro ADD COLUMN Stock_Total INT NOT NULL DEFAULT 0"
+            "ALTER TABLE libro ADD COLUMN Stock_Total INT NOT NULL DEFAULT 0"
         ))
-        conn.execute(text("UPDATE Libro SET Stock_Total = Stock"))
+        conn.execute(text("UPDATE libro SET Stock_Total = Stock"))
 
 
 ensure_book_total_stock_column()
@@ -213,7 +213,7 @@ ensure_book_total_stock_column()
 def ensure_loan_schema():
     with engine.begin() as conn:
         conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS Cuaderno_Diario ("
+            "CREATE TABLE IF NOT EXISTS cuaderno_diario ("
             "ID_Cuaderno INT NOT NULL AUTO_INCREMENT, "
             "ID_Libro INT NOT NULL, "
             "ID_Responsable INT NULL, Responsable_Nombre VARCHAR(100) NOT NULL, "
@@ -226,10 +226,10 @@ def ensure_loan_schema():
             "INDEX idx_cuaderno_estado_responsable (Estado, ID_Responsable), "
             "INDEX idx_cuaderno_libro_estado (ID_Libro, Estado), "
             "INDEX idx_cuaderno_fecha (Fecha_Prestamo), "
-            "CONSTRAINT fk_cuaderno_libro FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
-            "CONSTRAINT fk_cuaderno_responsable FOREIGN KEY (ID_Responsable) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
-            "CONSTRAINT fk_cuaderno_retira FOREIGN KEY (ID_Retira) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
-            "CONSTRAINT fk_cuaderno_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES Usuario(ID_Usuario), "
+            "CONSTRAINT fk_cuaderno_libro FOREIGN KEY (ID_Libro) REFERENCES libro(ID_Libro), "
+            "CONSTRAINT fk_cuaderno_responsable FOREIGN KEY (ID_Responsable) REFERENCES usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_cuaderno_retira FOREIGN KEY (ID_Retira) REFERENCES usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_cuaderno_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES usuario(ID_Usuario), "
             "CONSTRAINT chk_cuaderno_cantidad CHECK (Cantidad > 0), "
             "CONSTRAINT chk_cuaderno_curso CHECK (Curso BETWEEN 1 AND 6), "
             "CONSTRAINT chk_cuaderno_division CHECK (Division BETWEEN 1 AND 10), "
@@ -237,7 +237,7 @@ def ensure_loan_schema():
             ") ENGINE=InnoDB"
         ))
         conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS Ficha_Domiciliaria ("
+            "CREATE TABLE IF NOT EXISTS ficha_domiciliaria ("
             "ID_Ficha INT NOT NULL AUTO_INCREMENT, "
             "ID_Libro INT NOT NULL, "
             "ID_Responsable INT NULL, Responsable_Nombre VARCHAR(100) NOT NULL, "
@@ -251,9 +251,9 @@ def ensure_loan_schema():
             "INDEX idx_ficha_estado_responsable (Estado, ID_Responsable), "
             "INDEX idx_ficha_libro_estado (ID_Libro, Estado), "
             "INDEX idx_ficha_fecha (Fecha_Prestamo), "
-            "CONSTRAINT fk_ficha_libro FOREIGN KEY (ID_Libro) REFERENCES Libro(ID_Libro), "
-            "CONSTRAINT fk_ficha_responsable FOREIGN KEY (ID_Responsable) REFERENCES Usuario(ID_Usuario) ON DELETE SET NULL, "
-            "CONSTRAINT fk_ficha_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES Usuario(ID_Usuario), "
+            "CONSTRAINT fk_ficha_libro FOREIGN KEY (ID_Libro) REFERENCES libro(ID_Libro), "
+            "CONSTRAINT fk_ficha_responsable FOREIGN KEY (ID_Responsable) REFERENCES usuario(ID_Usuario) ON DELETE SET NULL, "
+            "CONSTRAINT fk_ficha_bibliotecaria FOREIGN KEY (ID_Bibliotecaria) REFERENCES usuario(ID_Usuario), "
             "CONSTRAINT chk_ficha_cantidad CHECK (Cantidad > 0), "
             "CONSTRAINT chk_ficha_curso CHECK (Curso BETWEEN 1 AND 6), "
             "CONSTRAINT chk_ficha_division CHECK (Division BETWEEN 1 AND 10), "
@@ -262,7 +262,7 @@ def ensure_loan_schema():
             ") ENGINE=InnoDB"
         ))
         conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS Schema_Migration ("
+            "CREATE TABLE IF NOT EXISTS schema_migration ("
             "Migration_Key VARCHAR(100) NOT NULL PRIMARY KEY, "
             "Applied_At DATETIME NOT NULL"
             ") ENGINE=InnoDB"
@@ -278,19 +278,19 @@ def ensure_graduated_account_fields():
                 text(
                     "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT "
                     "FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Usuario'"
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuario'"
                 )
             ).fetchall()
         }
         account_columns = {
             'Es_Egresado': (
-                "ALTER TABLE Usuario ADD COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE Usuario MODIFY COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE usuario ADD COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE usuario MODIFY COLUMN Es_Egresado TINYINT(1) NOT NULL DEFAULT 0",
                 '0',
             ),
             'Cuenta_Activa': (
-                "ALTER TABLE Usuario ADD COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
-                "ALTER TABLE Usuario MODIFY COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE usuario ADD COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE usuario MODIFY COLUMN Cuenta_Activa TINYINT(1) NOT NULL DEFAULT 1",
                 '1',
             ),
         }
@@ -302,7 +302,7 @@ def ensure_graduated_account_fields():
                 nullable, current_default = column_state
                 if nullable == 'YES':
                     conn.execute(
-                        text(f"UPDATE Usuario SET {column} = :default WHERE {column} IS NULL"),
+                        text(f"UPDATE usuario SET {column} = :default WHERE {column} IS NULL"),
                         {'default': int(default)},
                     )
                 if nullable == 'YES' or str(current_default) != default:
@@ -310,13 +310,13 @@ def ensure_graduated_account_fields():
 
         migration_key = 'graduated_account_state_v1'
         migration_applied = conn.execute(
-            text("SELECT 1 FROM Schema_Migration WHERE Migration_Key = :key"),
+            text("SELECT 1 FROM schema_migration WHERE Migration_Key = :key"),
             {'key': migration_key},
         ).fetchone()
         if not migration_applied:
             conn.execute(
                 text(
-                    "INSERT INTO Schema_Migration (Migration_Key, Applied_At) "
+                    "INSERT INTO schema_migration (Migration_Key, Applied_At) "
                     "VALUES (:key, CURRENT_TIMESTAMP)"
                 ),
                 {'key': migration_key},
@@ -509,7 +509,7 @@ def ensure_user_not_banned(conn, row):
     if ban_until and ban_until <= datetime.datetime.utcnow():
         conn.execute(
             text(
-                "UPDATE Usuario SET Estado = 'no vetado', Motivo_Veto = NULL, Veto_Hasta = NULL "
+                "UPDATE usuario SET Estado = 'no vetado', Motivo_Veto = NULL, Veto_Hasta = NULL "
                 "WHERE ID_Usuario = :id"
             ),
             {'id': row[0]},
@@ -554,7 +554,7 @@ def get_authenticated_user(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
                 "Curso, Division, Cuenta_Activa, Es_Egresado "
-                "FROM Usuario WHERE ID_Usuario = :id"
+                "FROM usuario WHERE ID_Usuario = :id"
             ),
             {'id': user_id},
         ).fetchone()
@@ -598,7 +598,7 @@ def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int
 
     conn.execute(
         text(
-            "INSERT INTO Baja_Ejemplares (ID_Libro, ID_Usuario_Bibliotecario, Cantidad, Motivo, Fecha)"
+            "INSERT INTO baja_ejemplares (ID_Libro, ID_Usuario_Bibliotecario, Cantidad, Motivo, Fecha)"
             " VALUES (:id_libro, :id_usuario, :cantidad, :motivo, :fecha)"
         ),
         {
@@ -616,7 +616,7 @@ def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripci
         raise HTTPException(status_code=400, detail=f'Tipo de evento inválido: {tipo_evento}')
     conn.execute(
         text(
-            "INSERT INTO Log_Sistema (Tipo_Evento, ID_Usuario, ID_Libro, Descripcion, Fecha)"
+            "INSERT INTO log_sistema (Tipo_Evento, ID_Usuario, ID_Libro, Descripcion, Fecha)"
             " VALUES (:tipo, :id_usuario, :id_libro, :descripcion, :fecha)"
         ),
         {
@@ -700,7 +700,7 @@ async def enforce_role_middleware(request: Request, call_next):
 @app.get('/api/authors')
 def list_authors():
     with engine.connect() as conn:
-        res = conn.execute(text("SELECT ID_Autor, Nombre FROM Autor ORDER BY Nombre"))
+        res = conn.execute(text("SELECT ID_Autor, Nombre FROM autor ORDER BY Nombre"))
         return [{'ID_Autor': row[0], 'Nombre': row[1]} for row in res.fetchall()]
 
 
@@ -712,7 +712,7 @@ def add_book(request: Request, book: BookIn):
     with engine.begin() as conn:
         # Se guarda el libro con parámetros SQL para evitar problemas con caracteres especiales.
         stmt = text(
-            "INSERT INTO Libro (Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock, Stock_Total)"
+            "INSERT INTO libro (Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock, Stock_Total)"
             " VALUES (:titulo, :editorial, :id_autor, :anio, :isbn, :sinopsis, :stock, :stock_total)"
         )
         params = {
@@ -740,7 +740,7 @@ def get_book(request: Request, book_id: int):
             text(
                 "SELECT l.ID_Libro, l.Titulo, l.Editorial, l.ID_Autor, l.Año_Publicacion, "
                 "l.ISBN, l.Sinopsis, l.Stock, l.Stock_Total, a.Nombre "
-                "FROM Libro l LEFT JOIN Autor a ON l.ID_Autor = a.ID_Autor "
+                "FROM libro l LEFT JOIN autor a ON l.ID_Autor = a.ID_Autor "
                 "WHERE l.ID_Libro = :id"
             ),
             {'id': book_id}
@@ -770,7 +770,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
         current = conn.execute(
             text(
                 "SELECT Titulo, Editorial, ID_Autor, Año_Publicacion, ISBN, Sinopsis, Stock "
-                "FROM Libro WHERE ID_Libro = :id FOR UPDATE"
+                "FROM libro WHERE ID_Libro = :id FOR UPDATE"
             ),
             {'id': book_id},
         ).fetchone()
@@ -811,7 +811,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
                 params['stock'] = new_stock
                 updates.append('Stock_Total = Stock_Total + :stock_delta')
                 params['stock_delta'] = new_stock - current_stock
-                conn.execute(text("UPDATE Libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
+                conn.execute(text("UPDATE libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
                 insert_baja_record(conn, book_id, user['ID_Usuario'], reduction, book.Motivo)
                 insert_log(conn, 'Stock Reducido', user['ID_Usuario'], book_id, f'Stock reducido: {reduction} ejemplar(es) - Motivo: {book.Motivo}')
                 return {'ok': True, 'updated': book_id, 'reduced': reduction}
@@ -821,7 +821,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
             params['stock_delta'] = new_stock - current_stock
 
         if updates:
-            conn.execute(text("UPDATE Libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
+            conn.execute(text("UPDATE libro SET " + ', '.join(updates) + " WHERE ID_Libro = :id"), params)
         return {'ok': True, 'updated': book_id}
 
 
@@ -830,7 +830,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
 def delete_book(request: Request, book_id: int):
     with engine.begin() as conn:
         existing = conn.execute(
-            text('SELECT 1 FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            text('SELECT 1 FROM libro WHERE ID_Libro = :id FOR UPDATE'),
             {'id': book_id},
         ).fetchone()
         if not existing:
@@ -838,10 +838,10 @@ def delete_book(request: Request, book_id: int):
 
         related_records = conn.execute(
             text(
-                "SELECT 1 FROM Cuaderno_Diario WHERE ID_Libro = :id "
-                "UNION ALL SELECT 1 FROM Ficha_Domiciliaria WHERE ID_Libro = :id "
-                "UNION ALL SELECT 1 FROM Baja_Ejemplares WHERE ID_Libro = :id "
-                "UNION ALL SELECT 1 FROM Log_Sistema WHERE ID_Libro = :id LIMIT 1"
+                "SELECT 1 FROM cuaderno_diario WHERE ID_Libro = :id "
+                "UNION ALL SELECT 1 FROM ficha_domiciliaria WHERE ID_Libro = :id "
+                "UNION ALL SELECT 1 FROM baja_ejemplares WHERE ID_Libro = :id "
+                "UNION ALL SELECT 1 FROM log_sistema WHERE ID_Libro = :id LIMIT 1"
             ),
             {'id': book_id},
         ).fetchone()
@@ -850,7 +850,7 @@ def delete_book(request: Request, book_id: int):
                 status_code=409,
                 detail='No se puede eliminar el libro porque tiene registros en historiales protegidos',
             )
-        conn.execute(text('DELETE FROM Libro WHERE ID_Libro = :id'), {'id': book_id})
+        conn.execute(text('DELETE FROM libro WHERE ID_Libro = :id'), {'id': book_id})
     return {'ok': True, 'deleted': book_id}
 
 
@@ -866,7 +866,7 @@ def stock_reduction(request: Request, data: StockReductionIn):
 
     with engine.begin() as conn:
         book = conn.execute(
-            text("SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE"),
+            text("SELECT Stock FROM libro WHERE ID_Libro = :id FOR UPDATE"),
             {'id': data.ID_Libro},
         ).fetchone()
         if not book:
@@ -875,7 +875,7 @@ def stock_reduction(request: Request, data: StockReductionIn):
             raise HTTPException(status_code=400, detail='Stock insuficiente para esta baja')
         conn.execute(
             text(
-                "UPDATE Libro SET Stock = Stock - :cantidad, "
+                "UPDATE libro SET Stock = Stock - :cantidad, "
                 "Stock_Total = Stock_Total - :cantidad WHERE ID_Libro = :id"
             ),
             {'cantidad': data.Cantidad, 'id': data.ID_Libro},
@@ -900,14 +900,14 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
     with engine.begin() as conn:
         conn.execute(
             text(
-                "UPDATE Usuario SET Estado = 'no vetado', Motivo_Veto = NULL, Veto_Hasta = NULL "
+                "UPDATE usuario SET Estado = 'no vetado', Motivo_Veto = NULL, Veto_Hasta = NULL "
                 "WHERE Estado = 'vetado' AND Veto_Hasta IS NOT NULL AND Veto_Hasta <= UTC_TIMESTAMP()"
             )
         )
         count_stmt = text(
-            "SELECT COUNT(*) FROM Usuario WHERE Tipo IN (:tipo0, :tipo1)"
+            "SELECT COUNT(*) FROM usuario WHERE Tipo IN (:tipo0, :tipo1)"
             if len(allowed_roles) == 2 else
-            "SELECT COUNT(*) FROM Usuario WHERE Tipo = :tipo"
+            "SELECT COUNT(*) FROM usuario WHERE Tipo = :tipo"
         )
         count_params = {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1]} if len(allowed_roles) == 2 else {'tipo': allowed_roles[0]}
         total = conn.execute(count_stmt, count_params).scalar() or 0
@@ -918,14 +918,14 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
             stmt = text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, "
                 "Motivo_Veto, Veto_Hasta, Es_Egresado, Cuenta_Activa "
-                "FROM Usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
+                "FROM usuario WHERE Tipo = :tipo ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo': allowed_roles[0], 'limit': limit, 'offset': offset}).fetchall()
         else:
             stmt = text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Estado, Curso, Division, "
                 "Motivo_Veto, Veto_Hasta, Es_Egresado, Cuenta_Activa "
-                "FROM Usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
+                "FROM usuario WHERE Tipo IN (:tipo0, :tipo1) ORDER BY Tipo, Nombre_Completo LIMIT :limit OFFSET :offset"
             )
             rows = conn.execute(stmt, {'tipo0': allowed_roles[0], 'tipo1': allowed_roles[1], 'limit': limit, 'offset': offset}).fetchall()
 
@@ -966,7 +966,7 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 
     with engine.begin() as conn:
         target = conn.execute(
-            text('SELECT Tipo, Es_Egresado FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
+            text('SELECT Tipo, Es_Egresado FROM usuario WHERE ID_Usuario = :id FOR UPDATE'),
             {'id': user_id}
         ).fetchone()
         if not target:
@@ -978,7 +978,7 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 
         result = conn.execute(
             text(
-                "UPDATE Usuario SET Estado = :estado, Motivo_Veto = :motivo, Veto_Hasta = :hasta "
+                "UPDATE usuario SET Estado = :estado, Motivo_Veto = :motivo, Veto_Hasta = :hasta "
                 "WHERE ID_Usuario = :id"
             ),
             {'estado': new_state, 'motivo': ban_reason, 'hasta': ban_until, 'id': user_id}
@@ -1000,7 +1000,7 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 def update_graduated_status(request: Request, user_id: int, data: GraduatedStatusUpdate):
     with engine.begin() as conn:
         target = conn.execute(
-            text('SELECT Tipo, Curso FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'),
+            text('SELECT Tipo, Curso FROM usuario WHERE ID_Usuario = :id FOR UPDATE'),
             {'id': user_id},
         ).fetchone()
         if not target:
@@ -1011,7 +1011,7 @@ def update_graduated_status(request: Request, user_id: int, data: GraduatedStatu
                 detail='La clasificación solo se puede cambiar para alumnos de 6.º curso',
             )
         conn.execute(
-            text('UPDATE Usuario SET Es_Egresado = :egresado WHERE ID_Usuario = :id'),
+            text('UPDATE usuario SET Es_Egresado = :egresado WHERE ID_Usuario = :id'),
             {'egresado': data.Es_Egresado, 'id': user_id},
         )
     return {'ok': True, 'ID_Usuario': user_id, 'Es_Egresado': data.Es_Egresado}
@@ -1024,7 +1024,7 @@ def update_account_activation(request: Request, user_id: int, data: AccountActiv
         target = conn.execute(
             text(
                 'SELECT Tipo, Es_Egresado, Cuenta_Activa '
-                'FROM Usuario WHERE ID_Usuario = :id FOR UPDATE'
+                'FROM usuario WHERE ID_Usuario = :id FOR UPDATE'
             ),
             {'id': user_id},
         ).fetchone()
@@ -1035,7 +1035,7 @@ def update_account_activation(request: Request, user_id: int, data: AccountActiv
         if not data.Cuenta_Activa:
             ensure_no_active_loans(conn, user_id)
         conn.execute(
-            text('UPDATE Usuario SET Cuenta_Activa = :active WHERE ID_Usuario = :id'),
+            text('UPDATE usuario SET Cuenta_Activa = :active WHERE ID_Usuario = :id'),
             {'active': data.Cuenta_Activa, 'id': user_id},
         )
     return {
@@ -1063,7 +1063,7 @@ def update_profile(request: Request, data: UserProfileUpdate):
     user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
     with engine.begin() as conn:
         conn.execute(
-            text('UPDATE Usuario SET Curso = :curso, Division = :division WHERE ID_Usuario = :id'),
+            text('UPDATE usuario SET Curso = :curso, Division = :division WHERE ID_Usuario = :id'),
             {'curso': data.Curso, 'division': data.Division, 'id': user['ID_Usuario']},
         )
     user['Curso'] = data.Curso
@@ -1088,7 +1088,7 @@ def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
     q = f"%{title}%"
     with engine.connect() as conn:
         total = conn.execute(
-            text("SELECT COUNT(*) FROM Libro WHERE Titulo LIKE :q"),
+            text("SELECT COUNT(*) FROM libro WHERE Titulo LIKE :q"),
             {'q': q}
         ).scalar() or 0
         pages = max(1, (int(total) + limit - 1) // limit)
@@ -1096,7 +1096,7 @@ def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
         stmt = text(
             "SELECT l.ID_Libro, l.Titulo, l.Editorial, l.ISBN, l.Sinopsis, l.Stock, "
             "l.Stock_Total, a.Nombre "
-            "FROM Libro l LEFT JOIN Autor a ON l.ID_Autor = a.ID_Autor "
+            "FROM libro l LEFT JOIN autor a ON l.ID_Autor = a.ID_Autor "
             "WHERE l.Titulo LIKE :q ORDER BY l.Titulo LIMIT :limit OFFSET :offset"
         )
         res = conn.execute(stmt, {'q': q, 'limit': limit, 'offset': offset})
@@ -1125,9 +1125,9 @@ def get_logs(request: Request, limit: int = 50):
         res = conn.execute(
             text(
                 "SELECT l.ID, l.Tipo_Evento, l.ID_Usuario, u.Nombre_Completo, l.ID_Libro, lib.Titulo, l.Descripcion, l.Fecha "
-                "FROM Log_Sistema l "
-                "LEFT JOIN Usuario u ON l.ID_Usuario = u.ID_Usuario "
-                "LEFT JOIN Libro lib ON l.ID_Libro = lib.ID_Libro "
+                "FROM log_sistema l "
+                "LEFT JOIN usuario u ON l.ID_Usuario = u.ID_Usuario "
+                "LEFT JOIN libro lib ON l.ID_Libro = lib.ID_Libro "
                 "ORDER BY l.Fecha DESC LIMIT :limit"
             ),
             {'limit': limit}
@@ -1153,20 +1153,20 @@ SELECT 'escolar' AS Tipo, c.ID_Cuaderno AS ID_Prestamo, c.ID_Libro, l.Titulo AS 
        c.ID_Retira, c.Retira_Nombre AS Retirado_Por, c.Cantidad, c.Curso, c.Division,
        c.Fecha_Prestamo, c.Fecha_Vencimiento, c.Fecha_Devolucion, c.Estado,
        NULL AS Apellido, NULL AS Nombre_Ficha, NULL AS DNI, NULL AS Telefono, NULL AS Dias
-FROM Cuaderno_Diario c
-JOIN Libro l ON l.ID_Libro = c.ID_Libro
-LEFT JOIN Autor a ON a.ID_Autor = l.ID_Autor
-LEFT JOIN Usuario u ON u.ID_Usuario = c.ID_Responsable
+FROM cuaderno_diario c
+JOIN libro l ON l.ID_Libro = c.ID_Libro
+LEFT JOIN autor a ON a.ID_Autor = l.ID_Autor
+LEFT JOIN usuario u ON u.ID_Usuario = c.ID_Responsable
 UNION ALL
 SELECT 'domiciliario' AS Tipo, f.ID_Ficha AS ID_Prestamo, f.ID_Libro, l.Titulo AS Libro, a.Nombre AS Autor,
        f.ID_Responsable, COALESCE(u.Nombre_Completo, f.Responsable_Nombre) AS Responsable,
        NULL AS ID_Retira, NULL AS Retirado_Por, f.Cantidad, f.Curso, f.Division,
        f.Fecha_Prestamo, f.Fecha_Vencimiento, f.Fecha_Devolucion, f.Estado,
        f.Apellido, f.Nombre AS Nombre_Ficha, f.DNI, f.Telefono, f.Dias
-FROM Ficha_Domiciliaria f
-JOIN Libro l ON l.ID_Libro = f.ID_Libro
-LEFT JOIN Autor a ON a.ID_Autor = l.ID_Autor
-LEFT JOIN Usuario u ON u.ID_Usuario = f.ID_Responsable
+FROM ficha_domiciliaria f
+JOIN libro l ON l.ID_Libro = f.ID_Libro
+LEFT JOIN autor a ON a.ID_Autor = l.ID_Autor
+LEFT JOIN usuario u ON u.ID_Usuario = f.ID_Responsable
 """
 
 
@@ -1266,7 +1266,7 @@ def list_loan_users(request: Request):
         rows = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Tipo, Curso, Division "
-                "FROM Usuario WHERE Tipo IN ('Alumno', 'Profesor') AND Cuenta_Activa = 1 "
+                "FROM usuario WHERE Tipo IN ('Alumno', 'Profesor') AND Cuenta_Activa = 1 "
                 "ORDER BY Tipo, Nombre_Completo"
             )
         ).fetchall()
@@ -1331,7 +1331,7 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
         responsible = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division, Cuenta_Activa "
-                "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
+                "FROM usuario WHERE ID_Usuario = :id FOR UPDATE"
             ),
             {'id': data.ID_Responsable},
         ).fetchone()
@@ -1352,7 +1352,7 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
             retira = conn.execute(
                 text(
                     "SELECT ID_Usuario, Nombre_Completo, Tipo, Cuenta_Activa "
-                    "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
+                    "FROM usuario WHERE ID_Usuario = :id FOR UPDATE"
                 ),
                 {'id': data.ID_Retira},
             ).fetchone()
@@ -1365,14 +1365,14 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
 
         active_school = conn.execute(
             text(
-                "SELECT COALESCE(SUM(Cantidad), 0) FROM Cuaderno_Diario "
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM cuaderno_diario "
                 "WHERE ID_Responsable = :id AND Estado = 'Activo'"
             ),
             {'id': data.ID_Responsable},
         ).scalar() or 0
         active_home = conn.execute(
             text(
-                "SELECT COALESCE(SUM(Cantidad), 0) FROM Ficha_Domiciliaria "
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM ficha_domiciliaria "
                 "WHERE ID_Responsable = :id AND Estado = 'Activo'"
             ),
             {'id': data.ID_Responsable},
@@ -1387,7 +1387,7 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
             )
 
         book = conn.execute(
-            text('SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            text('SELECT Stock FROM libro WHERE ID_Libro = :id FOR UPDATE'),
             {'id': data.ID_Libro},
         ).fetchone()
         if not book:
@@ -1395,12 +1395,12 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
         if int(book[0] or 0) < data.Cantidad:
             raise HTTPException(status_code=409, detail='Stock insuficiente')
         conn.execute(
-            text('UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
+            text('UPDATE libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
             {'cantidad': data.Cantidad, 'id': data.ID_Libro},
         )
         result = conn.execute(
             text(
-                "INSERT INTO Cuaderno_Diario "
+                "INSERT INTO cuaderno_diario "
                 "(ID_Libro, ID_Responsable, Responsable_Nombre, ID_Retira, Retira_Nombre, "
                 "ID_Bibliotecaria, Cantidad, Curso, Division, Fecha_Prestamo, Fecha_Vencimiento, Estado) "
                 "VALUES (:libro, :responsable, :responsable_nombre, :retira, :retira_nombre, "
@@ -1447,7 +1447,7 @@ def create_home_loan(request: Request, data: HomeLoanIn):
         responsible = conn.execute(
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Tipo, Estado, Curso, Division, Cuenta_Activa "
-                "FROM Usuario WHERE ID_Usuario = :id FOR UPDATE"
+                "FROM usuario WHERE ID_Usuario = :id FOR UPDATE"
             ),
             {'id': data.ID_Responsable},
         ).fetchone()
@@ -1464,14 +1464,14 @@ def create_home_loan(request: Request, data: HomeLoanIn):
 
         active_school = conn.execute(
             text(
-                "SELECT COALESCE(SUM(Cantidad), 0) FROM Cuaderno_Diario "
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM cuaderno_diario "
                 "WHERE ID_Responsable = :id AND Estado = 'Activo'"
             ),
             {'id': data.ID_Responsable},
         ).scalar() or 0
         active_home = conn.execute(
             text(
-                "SELECT COALESCE(SUM(Cantidad), 0) FROM Ficha_Domiciliaria "
+                "SELECT COALESCE(SUM(Cantidad), 0) FROM ficha_domiciliaria "
                 "WHERE ID_Responsable = :id AND Estado = 'Activo'"
             ),
             {'id': data.ID_Responsable},
@@ -1484,7 +1484,7 @@ def create_home_loan(request: Request, data: HomeLoanIn):
             )
 
         book = conn.execute(
-            text('SELECT Stock FROM Libro WHERE ID_Libro = :id FOR UPDATE'),
+            text('SELECT Stock FROM libro WHERE ID_Libro = :id FOR UPDATE'),
             {'id': data.ID_Libro},
         ).fetchone()
         if not book:
@@ -1492,12 +1492,12 @@ def create_home_loan(request: Request, data: HomeLoanIn):
         if int(book[0] or 0) < data.Cantidad:
             raise HTTPException(status_code=409, detail='Stock insuficiente')
         conn.execute(
-            text('UPDATE Libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
+            text('UPDATE libro SET Stock = Stock - :cantidad WHERE ID_Libro = :id AND Stock >= :cantidad'),
             {'cantidad': data.Cantidad, 'id': data.ID_Libro},
         )
         result = conn.execute(
             text(
-                "INSERT INTO Ficha_Domiciliaria "
+                "INSERT INTO ficha_domiciliaria "
                 "(ID_Libro, ID_Responsable, Responsable_Nombre, ID_Bibliotecaria, Cantidad, "
                 "Apellido, Nombre, DNI, Telefono, Curso, Division, Dias, Fecha_Prestamo, "
                 "Fecha_Vencimiento, Estado) "
@@ -1536,9 +1536,9 @@ def create_home_loan(request: Request, data: HomeLoanIn):
 @require_role('Bibliotecario', require_admin_email=True)
 def return_loan(request: Request, tipo: str, loan_id: int):
     if tipo == 'escolar':
-        table, id_column = 'Cuaderno_Diario', 'ID_Cuaderno'
+        table, id_column = 'cuaderno_diario', 'ID_Cuaderno'
     elif tipo == 'domiciliario':
-        table, id_column = 'Ficha_Domiciliaria', 'ID_Ficha'
+        table, id_column = 'ficha_domiciliaria', 'ID_Ficha'
     else:
         raise HTTPException(status_code=400, detail='Tipo de préstamo inválido')
 
@@ -1562,7 +1562,7 @@ def return_loan(request: Request, tipo: str, loan_id: int):
         if updated.rowcount != 1:
             raise HTTPException(status_code=409, detail='El préstamo ya fue devuelto')
         conn.execute(
-            text('UPDATE Libro SET Stock = Stock + :cantidad WHERE ID_Libro = :id'),
+            text('UPDATE libro SET Stock = Stock + :cantidad WHERE ID_Libro = :id'),
             {'cantidad': loan[1], 'id': loan[0]},
         )
         librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
@@ -1581,15 +1581,15 @@ def return_loan(request: Request, tipo: str, loan_id: int):
 def get_history_bajas(request: Request, page: int = 1, limit: int = 20):
     page, limit = normalize_pagination(page, limit)
     with engine.connect() as conn:
-        total = conn.execute(text('SELECT COUNT(*) FROM Baja_Ejemplares')).scalar() or 0
+        total = conn.execute(text('SELECT COUNT(*) FROM baja_ejemplares')).scalar() or 0
         pages = max(1, (int(total) + limit - 1) // limit)
         offset = (page - 1) * limit
         res = conn.execute(
             text(
                 "SELECT b.ID_Baja, b.ID_Libro, lib.Titulo, b.ID_Usuario_Bibliotecario, u.Nombre_Completo, b.Cantidad, b.Motivo, b.Fecha "
-                "FROM Baja_Ejemplares b "
-                "LEFT JOIN Usuario u ON b.ID_Usuario_Bibliotecario = u.ID_Usuario "
-                "LEFT JOIN Libro lib ON b.ID_Libro = lib.ID_Libro "
+                "FROM baja_ejemplares b "
+                "LEFT JOIN usuario u ON b.ID_Usuario_Bibliotecario = u.ID_Usuario "
+                "LEFT JOIN libro lib ON b.ID_Libro = lib.ID_Libro "
                 "ORDER BY b.ID_Baja DESC LIMIT :limit OFFSET :offset"
             ),
             {'limit': limit, 'offset': offset}
@@ -1625,7 +1625,7 @@ def login(data: LoginIn, request: Request, response: Response):
             text(
                 "SELECT ID_Usuario, Nombre_Completo, Gmail, Estado, Tipo, Motivo_Veto, Veto_Hasta, "
                 "Curso, Division, Cuenta_Activa, Es_Egresado, Contraseña "
-                "FROM Usuario WHERE Gmail = :g"
+                "FROM usuario WHERE Gmail = :g"
             ),
             {'g': data.Gmail},
         ).fetchone()
@@ -1636,7 +1636,7 @@ def login(data: LoginIn, request: Request, response: Response):
             raise HTTPException(status_code=401, detail='Credenciales inválidas')
         if is_legacy_password:
             conn.execute(
-                text("UPDATE Usuario SET Contraseña = :password WHERE ID_Usuario = :id"),
+                text("UPDATE usuario SET Contraseña = :password WHERE ID_Usuario = :id"),
                 {'password': hash_password(data.Contraseña), 'id': r[0]},
             )
         ensure_user_active(r)
@@ -1694,12 +1694,12 @@ def signup(data: SignupIn, request: Request, response: Response):
     tipo = infer_user_type(data.Gmail)
     with engine.begin() as conn:
         # Verificar si el Gmail ya existe
-        existing = conn.execute(text("SELECT 1 FROM Usuario WHERE Gmail = :g"), {'g': data.Gmail}).fetchone()
+        existing = conn.execute(text("SELECT 1 FROM usuario WHERE Gmail = :g"), {'g': data.Gmail}).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail='El correo ya está registrado')
         # Insertar nuevo usuario
         stmt = text(
-            "INSERT INTO Usuario (Nombre_Completo, Gmail, Contraseña, Estado, Tipo)"
+            "INSERT INTO usuario (Nombre_Completo, Gmail, Contraseña, Estado, Tipo)"
             " VALUES (:nombre, :gmail, :contraseña, 'no vetado', :tipo)"
         )
         res = conn.execute(stmt, {
