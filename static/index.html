@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Lorekeeper - Biblioteca</title>
-  <link rel="stylesheet" href="/static/styles.css?v=4">
+  <link rel="stylesheet" href="/static/styles.css?v=6">
 </head>
 <body>
   <div class="device">
@@ -19,13 +19,21 @@
 
       <nav class="bottom-nav" aria-label="Navegación principal">
         <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
-        <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user"><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
-        <a href="#" class="nav-item" data-view="my-loans" data-protected="true" data-role="borrower"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="#333" stroke-width="1.6"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mis préstamos</span></a>
-        <a href="#" class="nav-item" data-view="loans" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h16M4 19h16" stroke="#333" stroke-width="1.6"/><circle cx="7" cy="5" r="1" fill="#333"/><circle cx="7" cy="12" r="1" fill="#333"/><circle cx="7" cy="19" r="1" fill="#333"/></svg><span>Préstamos</span></a>
-        <a href="#" class="nav-item" data-view="admin" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
-        <a href="#" class="nav-item" data-view="edit" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="#333" stroke-width="1.6"/><path d="M7 11l5 5 5-5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Edición</span></a>
-        <a href="#" class="nav-item" data-view="history" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 10h16M4 15h16" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Historial</span></a>
-        <a href="#" class="nav-item" data-view="profiles" data-protected="true" data-role="Bibliotecario"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Perfiles</span></a>
+        <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
+        <a href="#" class="nav-item" data-view="my-loans" data-protected="true" data-role="borrower" hidden><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="#333" stroke-width="1.6"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mis préstamos</span></a>
+        <div class="nav-more" id="navMore" hidden>
+          <button type="button" class="nav-item nav-more-toggle" id="navMoreToggle" aria-expanded="false" aria-controls="navMoreMenu">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
+            <span>Más</span>
+          </button>
+          <div class="nav-more-menu" id="navMoreMenu" aria-label="Opciones de bibliotecario">
+            <a href="#" class="nav-item" data-view="loans" data-protected="true" data-role="Bibliotecario" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h16M4 19h16" stroke="#333" stroke-width="1.6"/><circle cx="7" cy="5" r="1" fill="#333"/><circle cx="7" cy="12" r="1" fill="#333"/><circle cx="7" cy="19" r="1" fill="#333"/></svg><span>Préstamos</span></a>
+            <a href="#" class="nav-item" data-view="admin" data-protected="true" data-role="Bibliotecario" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Alta Libro</span></a>
+            <a href="#" class="nav-item" data-view="edit" data-protected="true" data-role="Bibliotecario" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16" stroke="#333" stroke-width="1.6"/><path d="M7 11l5 5 5-5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Edición</span></a>
+            <a href="#" class="nav-item" data-view="history" data-protected="true" data-role="Bibliotecario" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 10h16M4 15h16" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Historial</span></a>
+            <a href="#" class="nav-item" data-view="profiles" data-protected="true" data-role="Bibliotecario" hidden><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Perfiles</span></a>
+          </div>
+        </div>
       </nav>
 
       <main>
@@ -75,7 +83,7 @@
           <div id="catalogContent">
           <div class="search">
             <input id="searchInput" placeholder="Buscar título del libro" />
-            <button id="searchBtn">🔍</button>
+            <button id="searchBtn" aria-label="Buscar">🔍</button>
           </div>
 
           <div class="section-title">Catálogo</div>
@@ -314,6 +322,6 @@
 
     </div>
   </div>
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

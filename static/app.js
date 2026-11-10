@@ -15,6 +15,112 @@ let authState = {
 let currentEditBookStock = null
 let historyCurrentTab = 'bajas'
 let banTargetUserId = null
+let uiAudioContext = null
+let uiAudioUnlocked = false
+let audioWarningShown = false
+
+function getUiAudioContext() {
+  if (uiAudioContext) return uiAudioContext
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextConstructor) {
+    if (!audioWarningShown) {
+      console.warn('El navegador no admite audio para el feedback de la interfaz.')
+      audioWarningShown = true
+    }
+    return null
+  }
+  uiAudioContext = new AudioContextConstructor()
+  return uiAudioContext
+}
+
+function playTone(context, frequency, startOffset, duration, type = 'sine') {
+  const oscillator = context.createOscillator()
+  const gain = context.createGain()
+  const start = context.currentTime + startOffset
+  oscillator.type = type
+  oscillator.frequency.setValueAtTime(frequency, start)
+  gain.gain.setValueAtTime(0.0001, start)
+  gain.gain.exponentialRampToValueAtTime(0.035, start + 0.008)
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration)
+  oscillator.connect(gain)
+  gain.connect(context.destination)
+  oscillator.start(start)
+  oscillator.stop(start + duration)
+}
+
+function playUiSound(kind = 'click') {
+  const context = getUiAudioContext()
+  if (!context) return
+
+  const play = () => {
+    uiAudioUnlocked = true
+    if (kind === 'success') {
+      playTone(context, 660, 0, 0.09)
+      playTone(context, 880, 0.1, 0.12)
+    } else if (kind === 'error') {
+      playTone(context, 260, 0, 0.11, 'triangle')
+      playTone(context, 190, 0.13, 0.13, 'triangle')
+    } else {
+      playTone(context, 470, 0, 0.045)
+    }
+  }
+
+  if (context.state === 'running') {
+    play()
+    return
+  }
+  context.resume().then(play).catch(error => {
+    console.warn('No se pudo habilitar el audio de la interfaz:', error)
+  })
+}
+
+function setupInteractionSounds() {
+  const lastFeedback = new WeakMap()
+  const statusForMessage = message => {
+    const text = message.textContent.trim()
+    if (!text) return null
+    const color = message.style.color.toLowerCase()
+    if (color === 'green' || color === 'rgb(0, 128, 0)') return 'success'
+    if (color === 'red' || color === 'rgb(255, 0, 0)') return 'error'
+    return /\b(error|no se pudo|falló|fallo)\b/i.test(text) ? 'error' : null
+  }
+
+  document.addEventListener('click', event => {
+    if (!(event.target instanceof Element)) return
+    const control = event.target.closest('button, a.nav-item, #welcome')
+    if (!control || control.hasAttribute('disabled') || control.getAttribute('aria-disabled') === 'true') return
+    uiAudioUnlocked = true
+    playUiSound('click')
+  }, true)
+
+  const feedbackObserver = new MutationObserver(records => {
+    const changedMessages = new Set()
+    records.forEach(record => {
+      const target = record.target instanceof Element ? record.target : record.target.parentElement
+      const message = target?.closest('.msg')
+      if (message) changedMessages.add(message)
+    })
+    changedMessages.forEach(message => {
+      const status = statusForMessage(message)
+      if (!status) {
+        lastFeedback.delete(message)
+        return
+      }
+      if (!uiAudioUnlocked) return
+      const fingerprint = `${status}:${message.textContent.trim()}`
+      if (lastFeedback.get(message) === fingerprint) return
+      lastFeedback.set(message, fingerprint)
+      playUiSound(status)
+    })
+  })
+  feedbackObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['style'],
+    characterData: true,
+    childList: true,
+    subtree: true
+  })
+}
 
 async function loadAuthState() {
   try {
@@ -48,27 +154,30 @@ async function logout() {
     response = await fetch('/api/logout', { method: 'POST' })
   } catch {
     alert('No se pudo conectar con el servidor para cerrar la sesión.')
+    playUiSound('error')
     return
   }
   if (!response.ok) {
     alert('No se pudo cerrar la sesión en el servidor.')
+    playUiSound('error')
     return
   }
+  playUiSound('success')
   authState = { isAuthenticated: false, ID_Usuario: null, Nombre_Completo: null, Tipo: null }
   updateUIBasedOnAuth()
   showView('account')
 }
 
 function setItemVisibility(item, isVisible) {
-  item.style.opacity = isVisible ? '1' : '0.35'
-  item.style.pointerEvents = isVisible ? 'auto' : 'none'
-  item.style.cursor = isVisible ? 'pointer' : 'not-allowed'
+  item.hidden = !isVisible
 }
 
 // Ajusta qué elementos se ven según el rol del usuario y si ya inició sesión.
 function updateUIBasedOnAuth() {
   const protectedItems = document.querySelectorAll('[data-protected="true"]')
   const welcome = document.getElementById('welcome')
+  const navMore = document.getElementById('navMore')
+  const navMoreToggle = document.getElementById('navMoreToggle')
   const normalizedRole = authState.Tipo ? authState.Tipo.trim() : ''
   const isUser = normalizedRole === 'Alumno' || normalizedRole === 'Profesor' || normalizedRole === 'Bibliotecario'
 
@@ -99,6 +208,11 @@ function updateUIBasedOnAuth() {
       welcome.style.display = 'none'
     }
   }
+  if (navMore) {
+    navMore.hidden = !navMore.querySelector('.nav-more-menu .nav-item:not([hidden])')
+    navMore.classList.remove('is-open')
+  }
+  if (navMoreToggle) navMoreToggle.setAttribute('aria-expanded', 'false')
 }
 
 // Cambia entre las vistas principales de la app y bloquea el acceso a las pantallas reservadas al bibliotecario.
@@ -126,6 +240,18 @@ function showView(viewName) {
     })
     const target = document.getElementById('view-' + viewName)
     if (target) target.style.display = 'block'
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
+      if (item.getAttribute('data-view') === viewName) {
+        item.setAttribute('aria-current', 'page')
+      } else {
+        item.removeAttribute('aria-current')
+      }
+    })
+    const navMore = document.getElementById('navMore')
+    const navMoreToggle = document.getElementById('navMoreToggle')
+    if (navMoreToggle) {
+      navMoreToggle.classList.toggle('active', Boolean(navMore?.querySelector('[aria-current="page"]')))
+    }
     if (viewName === 'home') {
       loadProfile()
       doSearch()
@@ -189,6 +315,7 @@ async function loadEditBooks(query = '', page = 1) {
     if (!res.ok) {
       results.innerHTML = '<p>Error cargando libros para editar</p>'
       if (pagination) pagination.innerHTML = ''
+      playUiSound('error')
       return
     }
     if (!data.books || data.books.length === 0) {
@@ -228,6 +355,7 @@ async function loadEditBooks(query = '', page = 1) {
     console.error('Error al cargar libros para editar:', e)
     results.innerHTML = '<p>Error cargando libros para editar</p>'
     if (pagination) pagination.innerHTML = ''
+    playUiSound('error')
   }
 }
 
@@ -298,6 +426,7 @@ async function renderHistoryTable(columns, rows, container, msg) {
     columns.forEach(col => {
       const td = document.createElement('td')
       const value = rowData[col.key]
+      td.dataset.label = col.label
       td.textContent = value != null ? value : '-'
       row.appendChild(td)
     })
@@ -410,6 +539,7 @@ async function doSearch(page = 1) {
     container.innerHTML = ''
     if (!res.ok) {
       container.textContent = data.detail || 'Error cargando catálogo.'
+      playUiSound('error')
       return
     }
     if (!data.books || data.books.length === 0) {
@@ -447,6 +577,7 @@ async function doSearch(page = 1) {
     if (container) {
       container.innerHTML = '<p>Error cargando catálogo.</p>'
     }
+    playUiSound('error')
   }
 }
 
@@ -867,6 +998,9 @@ async function loadProfiles(page = 1, preserveMessage = false) {
       }
       actionCell.appendChild(actions)
       row.appendChild(actionCell)
+      row.querySelectorAll('td').forEach((cell, index) => {
+        cell.dataset.label = headers[index]
+      })
       tbody.appendChild(row)
     })
     table.appendChild(tbody)
@@ -1195,6 +1329,7 @@ function setupEventListeners() {
         authState.Division = j.Division
         updateUIBasedOnAuth()
         if (msg) msg.textContent = ''
+        playUiSound('success')
         e.target.reset()
         showView('home')
       } else {
@@ -1441,7 +1576,28 @@ function setupEventListeners() {
 
 function setupNavigation() {
   // Se definen las rutas visibles dentro de la app.
-  document.querySelectorAll('.nav-item').forEach(a => {
+  const navMore = document.getElementById('navMore')
+  const navMoreToggle = document.getElementById('navMoreToggle')
+  if (navMore && navMoreToggle) {
+    navMoreToggle.addEventListener('click', () => {
+      const isOpen = navMore.classList.toggle('is-open')
+      navMoreToggle.setAttribute('aria-expanded', String(isOpen))
+    })
+    document.addEventListener('click', event => {
+      if (event.target instanceof Node && !navMore.contains(event.target)) {
+        navMore.classList.remove('is-open')
+        navMoreToggle.setAttribute('aria-expanded', 'false')
+      }
+    })
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && navMore.classList.contains('is-open')) {
+        navMore.classList.remove('is-open')
+        navMoreToggle.setAttribute('aria-expanded', 'false')
+        navMoreToggle.focus()
+      }
+    })
+  }
+  document.querySelectorAll('.nav-item[data-view]').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault()
       const view = a.getAttribute('data-view')
@@ -1449,6 +1605,10 @@ function setupNavigation() {
         alert('Debes iniciar sesión o crear una cuenta primero')
         showView('account')
         return
+      }
+      if (navMore?.contains(a)) {
+        navMore.classList.remove('is-open')
+        navMoreToggle?.setAttribute('aria-expanded', 'false')
       }
       showView(view)
     })
@@ -1461,6 +1621,7 @@ function initializeApp() {
   // La interfaz se prepara para usar la sesión y el catálogo.
   setupEventListeners()
   setupNavigation()
+  setupInteractionSounds()
   loadAuthState()
   fetchAuthors()
   // La app ya está lista para usarse.
