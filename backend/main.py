@@ -1,4 +1,9 @@
-"""API principal de Lorekeeper para catálogo, préstamos y perfiles."""
+"""API de Lorekeeper: autenticación, catálogo, perfiles, préstamos e historial.
+
+Este módulo conecta la interfaz estática con MySQL. Al importarse, prepara el
+esquema compatible; luego las rutas validan datos y permisos y realizan las
+operaciones de negocio dentro de transacciones SQLAlchemy.
+"""
 
 import base64
 import datetime
@@ -9,6 +14,7 @@ import secrets
 import time
 from functools import wraps
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -20,30 +26,38 @@ from backend.db import get_engine
 from backend.user_deletion import ensure_no_active_loans
 
 app = FastAPI(title='Lorekeeper API')
+# La cookie contiene un token aleatorio; el servidor guarda su hash, usuario y vencimiento.
 SESSION_COOKIE = 'lorekeeper_session'
 SESSION_TTL_SECONDS = 12 * 60 * 60
 PASSWORD_HASH_ITERATIONS = 600_000
+# Las sesiones viven en memoria: usar un solo worker hasta persistirlas fuera del proceso.
 sessions: dict[str, tuple[int, float]] = {}
+sessions_lock = Lock()
+
+
+def utc_now() -> datetime.datetime:
+    """Devuelve UTC sin zona horaria, formato compatible con columnas MySQL DATETIME."""
+    # MySQL DATETIME no guarda zona horaria; se conserva UTC como valor sin zona.
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def current_timestamp() -> str:
-    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    """Formatea la hora UTC para los registros de historial existentes."""
+    return utc_now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def format_datetime(value) -> str | None:
+    """Convierte una fecha/hora de MySQL al formato de la API."""
     return value.strftime('%Y-%m-%d %H:%M:%S') if value else None
 
 
 def format_date(value) -> str | None:
+    """Convierte una fecha de MySQL a ISO 8601 o devuelve ``None``."""
     return value.strftime('%Y-%m-%d') if value else None
 
-engine = get_engine()
 
-# El motor SQLAlchemy es el punto central del backend.
-# Las rutas reutilizan esta conexión para mantener la lógica de datos clara y compartida.
-# La aplicación no vuelve a crear el engine en cada petición.
-# La conexión ya quedó preparada en el módulo de base de datos y se reutiliza
-# para todas las operaciones de la biblioteca: usuarios, libros, préstamos y reportes.
+# El motor se crea en db.py y se reutiliza tanto en consultas como en transacciones.
+engine = get_engine()
 
 # Aquí se define la cuenta administrativa cuyas operaciones requieren autorización adicional.
 ADMIN_EMAIL = 'Bibliotecario.fanoba@tecnica29de6.edu.ar'
@@ -54,8 +68,9 @@ PROTECTED_ROUTE_ROLES = {
 VALID_BAJA_MOTIVOS = {'Dañado', 'Extraviado', 'Retirado'}
 
 
-# Al iniciar la API se revisa y actualiza el esquema si hace falta.
+# Migraciones de compatibilidad: agregan solo columnas faltantes a las tablas base.
 def ensure_user_state_column():
+    """Añade el estado de veto a instalaciones que todavía no lo tienen."""
     columns = {
         column['name'].lower()
         for column in sqlalchemy_inspect(engine).get_columns('usuario')
@@ -67,6 +82,7 @@ def ensure_user_state_column():
 
 
 def ensure_user_role_column():
+    """Añade el rol y asigna uno inicial a cuentas preexistentes."""
     columns = {
         column['name'].lower()
         for column in sqlalchemy_inspect(engine).get_columns('usuario')
@@ -90,6 +106,7 @@ ensure_user_role_column()
 
 
 def ensure_baja_ejemplares_table():
+    """Crea el registro de bajas técnicas sin reemplazar datos existentes."""
     with engine.begin() as conn:
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS baja_ejemplares ("
@@ -111,6 +128,7 @@ VALID_LOG_TYPES = {'Préstamo Activo', 'Préstamo Devuelto', 'Stock Reducido'}
 
 
 def ensure_log_sistema_table():
+    """Crea el historial de eventos y adapta el nombre de ID heredado."""
     with engine.begin() as conn:
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS log_sistema ("
@@ -146,6 +164,7 @@ ensure_log_sistema_table()
 
 
 def ensure_user_management_columns():
+    """Prepara curso y datos de veto; conserva compatibilidad del historial."""
     with engine.begin() as conn:
         existing_columns = {
             (row[0].lower(), row[1].lower())
@@ -190,6 +209,7 @@ ensure_user_management_columns()
 
 
 def ensure_book_total_stock_column():
+    """Agrega el inventario total y lo inicializa desde el stock disponible."""
     with engine.begin() as conn:
         has_total_stock = conn.execute(
             text(
@@ -211,6 +231,11 @@ ensure_book_total_stock_column()
 
 
 def ensure_loan_schema():
+    """Crea tablas e índices para préstamos escolares, domiciliarios y migraciones.
+
+    Las claves foráneas preservan las relaciones y los índices aceleran búsquedas
+    frecuentes por responsable, estado, libro y fecha.
+    """
     with engine.begin() as conn:
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS cuaderno_diario ("
@@ -271,6 +296,7 @@ ensure_loan_schema()
 
 
 def ensure_graduated_account_fields():
+    """Prepara egreso y actividad de cuenta y registra la migración aplicada."""
     with engine.begin() as conn:
         existing_columns = {
             row[0].lower(): (row[1], row[2])
@@ -326,7 +352,9 @@ def ensure_graduated_account_fields():
 ensure_graduated_account_fields()
 
 
+# Modelos Pydantic: describen y validan el JSON recibido antes de ejecutar SQL.
 class BookIn(BaseModel):
+    """Campos necesarios para dar de alta un libro."""
     Titulo: str = Field(..., max_length=100)
     Editorial: str | None = None
     ID_Autor: int | None = None
@@ -337,6 +365,7 @@ class BookIn(BaseModel):
 
 
 class BookUpdate(BaseModel):
+    """Campos opcionales para actualizar solo partes de un libro."""
     Titulo: str | None = None
     Editorial: str | None = None
     ID_Autor: int | None = None
@@ -348,6 +377,7 @@ class BookUpdate(BaseModel):
 
 
 class SchoolLoanIn(BaseModel):
+    """Datos de un préstamo escolar y de la persona responsable."""
     ID_Libro: int = Field(..., gt=0)
     ID_Responsable: int = Field(..., gt=0)
     ID_Retira: int | None = Field(None, gt=0)
@@ -358,6 +388,7 @@ class SchoolLoanIn(BaseModel):
 
 
 class HomeLoanIn(BaseModel):
+    """Datos del préstamo domiciliario y de la ficha física."""
     ID_Libro: int = Field(..., gt=0)
     ID_Responsable: int = Field(..., gt=0)
     Cantidad: int = Field(..., ge=1)
@@ -369,42 +400,51 @@ class HomeLoanIn(BaseModel):
 
 
 class StockReductionIn(BaseModel):
+    """Cantidad y motivo requeridos para registrar una baja de inventario."""
     ID_Libro: int
     Cantidad: int
     Motivo: str
 
 
 class UserStateUpdate(BaseModel):
+    """Estado de veto y, al aplicarlo, motivo y duración."""
     Estado: str = Field(..., max_length=30)
     Motivo: str | None = Field(None, max_length=255)
     Duracion_Dias: int | None = Field(None, ge=1, le=365)
 
 
 class GraduatedStatusUpdate(BaseModel):
+    """Clasificación de egreso de un alumno de sexto curso."""
     Es_Egresado: bool
 
 
 class AccountActivationUpdate(BaseModel):
+    """Estado activo/inactivo para una cuenta de alumno egresado."""
     Cuenta_Activa: bool
 
 
 class UserProfileUpdate(BaseModel):
+    """Curso y división que completa o modifica el usuario."""
     Curso: int = Field(..., ge=1, le=6)
     Division: int = Field(..., ge=1, le=10)
 
 
 class LoginIn(BaseModel):
+    """Credenciales validadas para iniciar sesión."""
     Gmail: str = Field(..., min_length=1, max_length=320)
     Contraseña: str
 
 
 class SignupIn(BaseModel):
+    """Datos validados para crear una cuenta desde el formulario público."""
     Nombre_Completo: str = Field(..., min_length=1, max_length=100)
     Gmail: str = Field(..., min_length=1, max_length=320)
     Contraseña: str
 
 
 def hash_password(password: str) -> str:
+    """Genera una cadena PBKDF2 que contiene algoritmo, iteraciones, sal y hash."""
+    # PBKDF2 combina una sal aleatoria y muchas iteraciones; no guarda la contraseña original.
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac(
         'sha256', password.encode('utf-8'), salt, PASSWORD_HASH_ITERATIONS
@@ -415,6 +455,7 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored_password: str | None) -> tuple[bool, bool]:
+    """Verifica el hash y devuelve (es_válida, es_contraseña_heredada)."""
     if not stored_password:
         return False, False
     if stored_password.startswith('pbkdf2_sha256$'):
@@ -441,10 +482,15 @@ def verify_password(password: str, stored_password: str | None) -> tuple[bool, b
 
 
 def create_session(response: Response, user_id: int, request: Request):
+    """Crea sesión temporal y envía el token opaco como cookie HttpOnly."""
+    # Se guarda el resumen del token, no el token de la cookie; se eliminan sesiones vencidas.
     token = secrets.token_urlsafe(32)
-    sessions[hashlib.sha256(token.encode('ascii')).hexdigest()] = (
-        user_id, time.time() + SESSION_TTL_SECONDS
-    )
+    now = time.time()
+    with sessions_lock:
+        expired_keys = [key for key, (_, expires_at) in sessions.items() if expires_at <= now]
+        for key in expired_keys:
+            del sessions[key]
+        sessions[hashlib.sha256(token.encode('ascii')).hexdigest()] = (user_id, now + SESSION_TTL_SECONDS)
     response.set_cookie(
         SESSION_COOKIE,
         token,
@@ -457,9 +503,11 @@ def create_session(response: Response, user_id: int, request: Request):
 
 
 def clear_session(response: Response, request: Request):
+    """Invalida el token de la sesión actual y borra la cookie del navegador."""
     token = request.cookies.get(SESSION_COOKIE)
     if token:
-        sessions.pop(hashlib.sha256(token.encode('utf-8')).hexdigest(), None)
+        with sessions_lock:
+            sessions.pop(hashlib.sha256(token.encode('utf-8')).hexdigest(), None)
     response.delete_cookie(
         SESSION_COOKIE,
         httponly=True,
@@ -472,7 +520,7 @@ def clear_session(response: Response, request: Request):
 # El rol del usuario se infiere con la misma lógica que usa la interfaz para mostrar
 # las vistas y bloquear accesos según si es alumno, profesor o bibliotecario.
 def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
-    """Inferir tipo de usuario (Alumno/Profesor/Bibliotecario) según el Gmail o el rol almacenado."""
+    """Obtiene el rol guardado o, en cuentas antiguas, lo deduce del correo."""
     if stored_type:
         normalized = stored_type.strip().lower()
         if normalized == 'bibliotecario':
@@ -486,27 +534,30 @@ def infer_user_type(gmail: str, stored_type: str | None = None) -> str:
 
 
 def get_request_identity(request: Request) -> int | None:
+    """Busca la sesión de la cookie; elimina del almacenamiento tokens vencidos."""
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
     key = hashlib.sha256(token.encode('utf-8')).hexdigest()
-    session = sessions.get(key)
-    if not session:
-        return None
-    user_id, expires_at = session
-    if expires_at <= time.time():
-        sessions.pop(key, None)
-        return None
-    return user_id
+    with sessions_lock:
+        session = sessions.get(key)
+        if not session:
+            return None
+        user_id, expires_at = session
+        if expires_at <= time.time():
+            sessions.pop(key, None)
+            return None
+        return user_id
 
 
 def ensure_user_not_banned(conn, row):
+    """Rechaza usuarios vetados y limpia un veto temporal ya vencido."""
     if row[3] != 'vetado':
         return
 
     ban_reason = row[5]
     ban_until = row[6]
-    if ban_until and ban_until <= datetime.datetime.utcnow():
+    if ban_until and ban_until <= utc_now():
         conn.execute(
             text(
                 "UPDATE usuario SET Estado = 'no vetado', Motivo_Veto = NULL, Veto_Hasta = NULL "
@@ -525,6 +576,7 @@ def ensure_user_not_banned(conn, row):
 
 
 def ensure_user_active(row):
+    """Rechaza cuentas inactivas aunque la persona no tenga un veto."""
     if not row[9]:
         raise HTTPException(status_code=403, detail='La cuenta está inactiva')
 
@@ -534,6 +586,11 @@ def get_authenticated_user(
     allowed_roles: list[str] | None = None,
     require_admin_email: bool = False,
 ):
+    """Carga la identidad desde la cookie y comprueba rol, actividad y veto.
+
+    El middleware guarda el usuario en ``request.state`` para que las rutas
+    protegidas puedan reutilizarlo durante la misma solicitud.
+    """
     cached_user = getattr(request.state, 'user', None)
     if cached_user:
         actual_type = cached_user['Tipo']
@@ -590,6 +647,7 @@ def get_authenticated_user(
 # Cada baja de stock queda registrada para mantener un historial claro de los ejemplares
 # que se dañaron, perdieron o retiraron del catálogo.
 def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int, motivo: str):
+    """Guarda la baja técnica dentro de la transacción que modifica el stock."""
     motivo = motivo.strip()
     if motivo not in VALID_BAJA_MOTIVOS:
         raise HTTPException(status_code=400, detail=f'Motivo inválido: {motivo}')
@@ -612,6 +670,7 @@ def insert_baja_record(conn, libro_id: int, bibliotecario_id: int, cantidad: int
 
 
 def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripcion: str | None = None):
+    """Agrega un evento permitido al historial de operaciones."""
     if tipo_evento not in VALID_LOG_TYPES:
         raise HTTPException(status_code=400, detail=f'Tipo de evento inválido: {tipo_evento}')
     conn.execute(
@@ -633,6 +692,8 @@ def insert_log(conn, tipo_evento: str, usuario_id: int, libro_id: int, descripci
 # Busca el objeto Request, verifica credenciales y bloquea accesos no autorizados
 # antes de ejecutar la función del endpoint.
 def require_role(*allowed_roles: str, require_admin_email: bool = False):
+    """Protege una ruta y, opcionalmente, exige además el correo de administración."""
+    # El decorador valida permisos en el servidor; ocultar una opción del menú no es seguridad.
     def decorator(func):
         if inspect.iscoroutinefunction(func):
             @wraps(func)
@@ -661,6 +722,7 @@ def require_role(*allowed_roles: str, require_admin_email: bool = False):
 # Normaliza los parámetros de paginación recibidos desde la interfaz.
 # Evita valores inválidos y establece valores mínimos seguros.
 def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
+    """Evita páginas y límites menores que uno en las consultas de listas."""
     try:
         page = int(page)
     except (TypeError, ValueError):
@@ -676,6 +738,7 @@ def normalize_pagination(page: int = 1, limit: int = 4) -> tuple[int, int]:
 
 @app.middleware('http')
 async def enforce_role_middleware(request: Request, call_next):
+    """Comprueba sesiones en las rutas API y deja pasar rutas públicas."""
     user_id = get_request_identity(request)
     if user_id and request.url.path.startswith('/api/') and request.url.path not in (
         '/api/login', '/api/signup', '/api/logout'
@@ -694,21 +757,22 @@ async def enforce_role_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Estas rutas exponen datos que la interfaz necesita de forma directa.
+# Rutas de autores y catálogo: abastecen la búsqueda y la administración de libros.
 # El frontend solicita autores, libros y estados de usuario para renderizar
 # los formularios y las tablas sin tener que reconstruir la lógica del backend.
 @app.get('/api/authors')
 def list_authors():
+    """Lista autores para completar los selectores de libros."""
     with engine.connect() as conn:
         res = conn.execute(text("SELECT ID_Autor, Nombre FROM autor ORDER BY Nombre"))
         return [{'ID_Autor': row[0], 'Nombre': row[1]} for row in res.fetchall()]
 
 
-# Estas rutas controlan el catálogo de libros: alta, edición, eliminación y ajustes de stock.
-# Están protegidas porque afectan directamente el inventario visible de la biblioteca.
+# Los cambios de catálogo requieren el rol y el correo de la bibliotecaria principal.
 @app.post('/api/books')
 @require_role('Bibliotecario', require_admin_email=True)
 def add_book(request: Request, book: BookIn):
+    """Crea un libro e inicializa su stock disponible y total."""
     with engine.begin() as conn:
         # Se guarda el libro con parámetros SQL para evitar problemas con caracteres especiales.
         stmt = text(
@@ -735,6 +799,7 @@ def add_book(request: Request, book: BookIn):
 @app.get('/api/books/{book_id}')
 @require_role('Bibliotecario', require_admin_email=True)
 def get_book(request: Request, book_id: int):
+    """Devuelve los datos completos de un libro para el formulario de edición."""
     with engine.connect() as conn:
         r = conn.execute(
             text(
@@ -765,6 +830,7 @@ def get_book(request: Request, book_id: int):
 @app.put('/api/books/{book_id}')
 @require_role('Bibliotecario', require_admin_email=True)
 def update_book(request: Request, book_id: int, book: BookUpdate):
+    """Actualiza los campos enviados y registra reducciones de inventario."""
     user = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
     with engine.begin() as conn:
         current = conn.execute(
@@ -828,6 +894,7 @@ def update_book(request: Request, book_id: int, book: BookUpdate):
 @app.delete('/api/books/{book_id}')
 @require_role('Bibliotecario', require_admin_email=True)
 def delete_book(request: Request, book_id: int):
+    """Elimina un libro solo cuando no está referenciado por un historial."""
     with engine.begin() as conn:
         existing = conn.execute(
             text('SELECT 1 FROM libro WHERE ID_Libro = :id FOR UPDATE'),
@@ -857,6 +924,7 @@ def delete_book(request: Request, book_id: int):
 @app.post('/api/stock-reduction')
 @require_role('Bibliotecario', require_admin_email=True)
 def stock_reduction(request: Request, data: StockReductionIn):
+    """Reduce stock disponible y total, guardando el motivo y el evento."""
     user = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
     motivo = data.Motivo.strip() if data.Motivo else ''
     if motivo not in VALID_BAJA_MOTIVOS:
@@ -888,6 +956,7 @@ def stock_reduction(request: Request, data: StockReductionIn):
 @app.get('/api/users')
 @require_role('Bibliotecario')
 def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 10):
+    """Devuelve perfiles paginados y libera vetos temporales vencidos."""
     role = role.strip()
     page, limit = normalize_pagination(page, limit)
     if role == 'all':
@@ -950,6 +1019,7 @@ def list_users(request: Request, role: str = 'all', page: int = 1, limit: int = 
 @app.put('/api/users/{user_id}/state')
 @require_role('Bibliotecario')
 def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
+    """Aplica o quita un veto; no confunde el veto con la actividad de la cuenta."""
     new_state = data.Estado.strip().lower()
     if new_state not in ['vetado', 'no vetado']:
         raise HTTPException(status_code=400, detail='Estado debe ser "vetado" o "no vetado"')
@@ -962,7 +1032,7 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
             raise HTTPException(status_code=400, detail='El motivo del veto es obligatorio')
         if data.Duracion_Dias is None:
             raise HTTPException(status_code=400, detail='La duración del veto es obligatoria')
-        ban_until = datetime.datetime.utcnow() + datetime.timedelta(days=data.Duracion_Dias)
+        ban_until = utc_now() + datetime.timedelta(days=data.Duracion_Dias)
 
     with engine.begin() as conn:
         target = conn.execute(
@@ -998,6 +1068,7 @@ def update_user_state(request: Request, user_id: int, data: UserStateUpdate):
 @app.put('/api/users/{user_id}/graduated-status')
 @require_role('Bibliotecario')
 def update_graduated_status(request: Request, user_id: int, data: GraduatedStatusUpdate):
+    """Permite clasificar como egresado solo a un alumno de sexto curso."""
     with engine.begin() as conn:
         target = conn.execute(
             text('SELECT Tipo, Curso FROM usuario WHERE ID_Usuario = :id FOR UPDATE'),
@@ -1020,6 +1091,7 @@ def update_graduated_status(request: Request, user_id: int, data: GraduatedStatu
 @app.put('/api/users/{user_id}/activation')
 @require_role('Bibliotecario')
 def update_account_activation(request: Request, user_id: int, data: AccountActivationUpdate):
+    """Activa/inactiva egresados sin borrar su cuenta ni su historial."""
     with engine.begin() as conn:
         target = conn.execute(
             text(
@@ -1048,6 +1120,7 @@ def update_account_activation(request: Request, user_id: int, data: AccountActiv
 @app.get('/api/profile')
 @require_role('Alumno', 'Profesor')
 def get_profile(request: Request):
+    """Entrega el curso y la división del usuario autenticado."""
     user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
     return {
         'ID_Usuario': user['ID_Usuario'],
@@ -1060,6 +1133,7 @@ def get_profile(request: Request):
 @app.put('/api/profile')
 @require_role('Alumno', 'Profesor')
 def update_profile(request: Request, data: UserProfileUpdate):
+    """Guarda curso y división en la cuenta del usuario autenticado."""
     user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
     with engine.begin() as conn:
         conn.execute(
@@ -1073,6 +1147,7 @@ def update_profile(request: Request, data: UserProfileUpdate):
 
 @app.get('/api/search')
 def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
+    """Busca por título y devuelve libros paginados en formato JSON."""
     user_id = get_request_identity(request)
     if user_id:
         user = get_authenticated_user(request)
@@ -1119,6 +1194,7 @@ def search(request: Request, title: str = '', page: int = 1, limit: int = 4):
 @app.get('/api/logs')
 @require_role('Bibliotecario')
 def get_logs(request: Request, limit: int = 50):
+    """Devuelve los eventos recientes para la vista de historial."""
     if limit <= 0:
         limit = 50
     with engine.connect() as conn:
@@ -1168,9 +1244,11 @@ JOIN libro l ON l.ID_Libro = f.ID_Libro
 LEFT JOIN autor a ON a.ID_Autor = l.ID_Autor
 LEFT JOIN usuario u ON u.ID_Usuario = f.ID_Responsable
 """
+# La unión normaliza columnas de los dos módulos para compartir filtros y tarjetas.
 
 
 def loan_filters(tipo, estado, libro_id, persona, curso, division):
+    """Construye filtros parametrizados para listados de préstamos."""
     conditions = []
     params: dict[str, object] = {}
     if tipo and tipo != 'todos':
@@ -1205,6 +1283,7 @@ def loan_filters(tipo, estado, libro_id, persona, curso, division):
 
 
 def loan_record(row):
+    """Convierte una fila de la unión SQL al objeto JSON público."""
     return {
         'Tipo': row[0],
         'ID_Prestamo': row[1],
@@ -1231,6 +1310,7 @@ def loan_record(row):
 
 
 def paginated_loans(conn, page, limit, filters, params, owner_id=None):
+    """Consulta préstamos paginados, opcionalmente limitados al responsable."""
     page, limit = normalize_pagination(page, limit)
     limit = min(limit, 100)
     owner_filter = (
@@ -1262,6 +1342,7 @@ def paginated_loans(conn, page, limit, filters, params, owner_id=None):
 @app.get('/api/loan-users')
 @require_role('Bibliotecario', require_admin_email=True)
 def list_loan_users(request: Request):
+    """Lista cuentas activas que la bibliotecaria puede seleccionar."""
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -1296,6 +1377,7 @@ def list_all_loans(
     page: int = 1,
     limit: int = 20,
 ):
+    """Lista préstamos globales aplicando los filtros de administración."""
     filters, params = loan_filters(tipo, estado, libro_id, persona, curso, division)
     with engine.connect() as conn:
         return paginated_loans(conn, page, limit, filters, params)
@@ -1310,6 +1392,7 @@ def list_my_loans(
     page: int = 1,
     limit: int = 20,
 ):
+    """Limita el historial al usuario autenticado; no acepta un dueño del cliente."""
     user = get_authenticated_user(request, allowed_roles=['Alumno', 'Profesor'])
     filters, params = loan_filters(tipo, estado, None, '', None, None)
     with engine.connect() as conn:
@@ -1319,6 +1402,7 @@ def list_my_loans(
 @app.post('/api/loans/school')
 @require_role('Bibliotecario', require_admin_email=True)
 def create_school_loan(request: Request, data: SchoolLoanIn):
+    """Crea un Cuaderno Diario, descuenta stock y registra el movimiento juntos."""
     librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
     modalidad = data.Modalidad.strip()
     if modalidad not in ('Alumno', 'Profesor', 'AlumnoPorProfesor'):
@@ -1433,6 +1517,7 @@ def create_school_loan(request: Request, data: SchoolLoanIn):
 @app.post('/api/loans/home')
 @require_role('Bibliotecario', require_admin_email=True)
 def create_home_loan(request: Request, data: HomeLoanIn):
+    """Crea una Ficha Domiciliaria con vencimiento y responsable docente."""
     librarian = get_authenticated_user(request, allowed_roles=['Bibliotecario'], require_admin_email=True)
     values = (data.Apellido.strip(), data.Nombre.strip(), data.DNI.strip(), data.Telefono.strip())
     if not all(values):
@@ -1535,6 +1620,7 @@ def create_home_loan(request: Request, data: HomeLoanIn):
 @app.post('/api/loans/{tipo}/{loan_id}/return')
 @require_role('Bibliotecario', require_admin_email=True)
 def return_loan(request: Request, tipo: str, loan_id: int):
+    """Cierra un préstamo activo, devuelve sus ejemplares al stock y registra el evento."""
     if tipo == 'escolar':
         table, id_column = 'cuaderno_diario', 'ID_Cuaderno'
     elif tipo == 'domiciliario':
@@ -1579,6 +1665,7 @@ def return_loan(request: Request, tipo: str, loan_id: int):
 @app.get('/api/history/bajas')
 @require_role('Bibliotecario')
 def get_history_bajas(request: Request, page: int = 1, limit: int = 20):
+    """Devuelve el historial protegido de bajas en páginas."""
     page, limit = normalize_pagination(page, limit)
     with engine.connect() as conn:
         total = conn.execute(text('SELECT COUNT(*) FROM baja_ejemplares')).scalar() or 0
@@ -1612,12 +1699,13 @@ def get_history_bajas(request: Request, page: int = 1, limit: int = 20):
 @app.delete('/api/history/bajas')
 @require_role('Bibliotecario')
 def delete_history_bajas(request: Request):
+    """Mantiene explícitamente bloqueado el borrado del historial."""
     raise HTTPException(status_code=403, detail='El historial de bajas está protegido y no se puede vaciar')
 
 
 @app.post('/api/login')
 def login(data: LoginIn, request: Request, response: Response):
-    """Iniciar sesión con Gmail y Contraseña"""
+    """Verifica credenciales y migra a PBKDF2 si la contraseña era heredada."""
     if not 1 <= len(data.Contraseña) <= 256:
         raise HTTPException(status_code=400, detail='La contraseña tiene un formato inválido')
     with engine.begin() as conn:
@@ -1661,6 +1749,7 @@ def login(data: LoginIn, request: Request, response: Response):
 
 @app.get('/api/session')
 def get_session(request: Request):
+    """Devuelve el usuario de la cookie actual para restaurar la interfaz."""
     user = get_authenticated_user(request)
     return {
         'ID_Usuario': user['ID_Usuario'],
@@ -1677,13 +1766,14 @@ def get_session(request: Request):
 
 @app.post('/api/logout')
 def logout(request: Request, response: Response):
+    """Finaliza la sesión actual en servidor y navegador."""
     clear_session(response, request)
     return {'ok': True}
 
 
 @app.post('/api/signup')
 def signup(data: SignupIn, request: Request, response: Response):
-    """Crear nueva cuenta de usuario. Detecta automáticamente el tipo (Alumno/Profesor) según el Gmail."""
+    """Registra una cuenta pública y crea su sesión inicial."""
     if not 12 <= len(data.Contraseña) <= 256:
         raise HTTPException(
             status_code=400,
@@ -1713,13 +1803,12 @@ def signup(data: SignupIn, request: Request, response: Response):
     return {'ok': True, 'ID_Usuario': new_id, 'Nombre_Completo': data.Nombre_Completo, 'Gmail': data.Gmail, 'Tipo': tipo}
 
 
-# Se sirven los archivos estáticos que componen la interfaz web de la biblioteca.
+# Montaje del frontend: FastAPI entrega tanto los recursos de /static como index.html.
 static_dir = Path(__file__).resolve().parent.parent / 'static'
 if static_dir.exists():
     app.mount('/static', StaticFiles(directory=str(static_dir)), name='static_files')
-    # Sirve los archivos estáticos del frontend y la página principal.
-    # Si la carpeta no existe, la API seguirá funcionando pero no habrá UI web disponible.
+    # La ruta raíz sirve index.html; la API sigue disponible bajo /api/.
     app.mount('/', StaticFiles(directory=str(static_dir), html=True), name='static')
 else:
-    # Si la carpeta está ausente, la API sigue respondiendo pero la interfaz web no se verá.
+    # Permite ejecutar las rutas API aunque se haya quitado el frontend.
     pass

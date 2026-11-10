@@ -1,4 +1,5 @@
 :root {
+  /* Variables compartidas mantienen coherentes los colores y las sombras. */
   color-scheme: light;
   --accent: #176b5d;
   --accent-dark: #104d45;
@@ -842,6 +843,7 @@ button[type="submit"]:hover,
   }
 }
 
+/* En tabletas y móviles se reducen progresivamente las columnas y la navegación. */
 @media (max-width: 900px) {
   .bottom-nav {
     gap: 2px;

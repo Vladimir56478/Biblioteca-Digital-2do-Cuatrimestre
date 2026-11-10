@@ -1,5 +1,8 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-pymysql
-python-dotenv
+# API HTTP y servidor local compatible con ASGI.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+
+# Acceso a MySQL, conjunto de conexiones y lectura de backend/.env.
+sqlalchemy>=2,<3
+pymysql>=1,<2
+python-dotenv>=1,<2

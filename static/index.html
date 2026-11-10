@@ -18,6 +18,7 @@
       </header>
 
       <nav class="bottom-nav" aria-label="Navegación principal">
+        <!-- data-role controla la presentación; el backend vuelve a validar cada permiso. -->
         <a href="#" class="nav-item" data-view="account"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke="#333" stroke-width="1.6"/><path d="M6 20c1.5-3 7-3 12 0" stroke="#333" stroke-width="1.6"/></svg><span>Cuenta</span></a>
         <a href="#" class="nav-item" data-view="home" data-protected="true" data-role="user" hidden><svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Inicio</span></a>
         <a href="#" class="nav-item" data-view="my-loans" data-protected="true" data-role="borrower" hidden><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="#333" stroke-width="1.6"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#333" stroke-width="1.6" stroke-linecap="round"/></svg><span>Mis préstamos</span></a>
@@ -322,6 +323,6 @@
 
     </div>
   </div>
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

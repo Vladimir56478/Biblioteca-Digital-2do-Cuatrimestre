@@ -2,6 +2,7 @@
   Lógica de la interfaz de la biblioteca digital.
   Controla el login, los permisos por rol, la búsqueda de libros,
   la edición del catálogo, los préstamos y la comunicación con la API del backend.
+  `async`/`await` permite esperar respuestas HTTP sin bloquear la interfaz.
 */
 
 // Estado de presentación; la identidad real se obtiene del backend mediante la cookie de sesión.
@@ -93,6 +94,7 @@ function setupInteractionSounds() {
     playUiSound('click')
   }, true)
 
+  // Observa cambios en los mensajes para reproducir un sonido sin modificar sus funciones.
   const feedbackObserver = new MutationObserver(records => {
     const changedMessages = new Set()
     records.forEach(record => {
@@ -326,24 +328,33 @@ async function loadEditBooks(query = '', page = 1) {
     data.books.forEach(it => {
       const card = document.createElement('div')
       card.className = 'card'
-      card.innerHTML = `
-        <div class="thumb"></div>
-        <div style="flex:1">
-          <div style="font-weight:700; color:var(--accent); margin-bottom:4px">${it.Titulo}</div>
-          <p style="margin:0; color:#444; font-size:13px;"><strong>Autor:</strong> ${it.Autor || '--'}</p>
-          <p style="margin:0; color:#444; font-size:13px;"><strong>Editorial:</strong> ${it.Editorial || '--'}</p>
-          <p style="margin:0; color:#0b5a52; font-weight:700;">Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}</p>
-          <button type="button" class="edit-book-btn" data-id="${it.ID_Libro}">Editar</button>
-        </div>
-      `
+      const thumb = document.createElement('div')
+      thumb.className = 'thumb'
+      const details = document.createElement('div')
+      details.style.flex = '1'
+      const title = document.createElement('div')
+      title.className = 'book-title'
+      // textContent muestra los datos de MySQL como texto y no los interpreta como HTML.
+      title.textContent = it.Titulo
+      const author = document.createElement('p')
+      const authorLabel = document.createElement('strong')
+      authorLabel.textContent = 'Autor: '
+      author.append(authorLabel, document.createTextNode(it.Autor || '--'))
+      const publisher = document.createElement('p')
+      const publisherLabel = document.createElement('strong')
+      publisherLabel.textContent = 'Editorial: '
+      publisher.append(publisherLabel, document.createTextNode(it.Editorial || '--'))
+      const stock = document.createElement('p')
+      stock.className = 'book-stock'
+      stock.textContent = `Total: ${it.Stock_Total} · Disponibles: ${it.Stock_Disponible}`
+      const editButton = document.createElement('button')
+      editButton.type = 'button'
+      editButton.className = 'edit-book-btn'
+      editButton.textContent = 'Editar'
+      editButton.addEventListener('click', () => openBookForEditing(it.ID_Libro))
+      details.append(title, author, publisher, stock, editButton)
+      card.append(thumb, details)
       results.appendChild(card)
-    })
-    document.querySelectorAll('.edit-book-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const bookId = Number(btn.getAttribute('data-id'))
-        const book = data.books.find(item => item.ID_Libro === bookId)
-        if (book) populateEditForm(book)
-      })
     })
     editState.page = data.page
     editState.pages = data.pages
@@ -355,6 +366,22 @@ async function loadEditBooks(query = '', page = 1) {
     console.error('Error al cargar libros para editar:', e)
     results.innerHTML = '<p>Error cargando libros para editar</p>'
     if (pagination) pagination.innerHTML = ''
+    playUiSound('error')
+  }
+}
+
+async function openBookForEditing(bookId) {
+  const msg = document.getElementById('editMsg')
+  try {
+    const response = await fetch(`/api/books/${bookId}`, { headers: getAuthHeaders() })
+    const book = await response.json()
+    if (!response.ok) throw new Error(book.detail || 'No se pudo consultar el libro')
+    populateEditForm(book)
+  } catch (error) {
+    if (msg) {
+      msg.textContent = `No se pudo abrir el libro: ${error.message}`
+      msg.style.color = 'red'
+    }
     playUiSound('error')
   }
 }
@@ -530,7 +557,8 @@ async function doSearch(page = 1) {
   const container = document.getElementById('results')
   const pagination = document.getElementById('resultsPagination')
   if (!container) return
-  
+
+  container.textContent = 'Buscando libros…'
   try {
     const res = await fetch('/api/search?title=' + encodeURIComponent(q) + '&page=' + page + '&limit=' + searchState.limit, {
       headers: getAuthHeaders()
@@ -538,7 +566,13 @@ async function doSearch(page = 1) {
     const data = await res.json()
     container.innerHTML = ''
     if (!res.ok) {
-      container.textContent = data.detail || 'Error cargando catálogo.'
+      const detail = data.detail
+      container.textContent = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map(error => error.msg).filter(Boolean).join('; ') || 'Error cargando catálogo.'
+          : 'Error cargando catálogo.'
+      if (pagination) pagination.innerHTML = ''
       playUiSound('error')
       return
     }
@@ -1390,7 +1424,7 @@ function setupEventListeners() {
   // Buscar libros
   const searchBtn = document.getElementById('searchBtn')
   if (searchBtn) {
-    searchBtn.addEventListener('click', doSearch)
+    searchBtn.addEventListener('click', () => doSearch())
   }
   const searchInput = document.getElementById('searchInput')
   if (searchInput) {
